@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - master
+    tags:
+      - v*
   workflow_dispatch:
 
 env:
@@ -42,6 +44,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=sha
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
