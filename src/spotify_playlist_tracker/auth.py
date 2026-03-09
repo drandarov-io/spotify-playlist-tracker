@@ -117,16 +117,19 @@ def _exchange_token(settings: AppSettings, form_data: dict[str, str]) -> TokenDa
 
 def authorize(settings: AppSettings, timeout_seconds: int = 180) -> TokenData:
     redirect_uri = urlparse(settings.spotify.redirect_uri)
-    if redirect_uri.scheme != "http" or redirect_uri.hostname not in {"127.0.0.1", "localhost"}:
-        raise AuthError("SPOTIFY_REDIRECT_URI must be a localhost http:// URL for the built-in authorize command.")
+    if redirect_uri.scheme not in {"http", "https"}:
+        raise AuthError("SPOTIFY_REDIRECT_URI must use http:// or https://.")
+
+    if redirect_uri.hostname is None:
+        raise AuthError("SPOTIFY_REDIRECT_URI must include a hostname.")
 
     if redirect_uri.port is None:
-        raise AuthError("SPOTIFY_REDIRECT_URI must include an explicit port.")
+        raise AuthError("SPOTIFY_REDIRECT_URI must include an explicit port for the built-in authorize command.")
 
     state = secrets.token_urlsafe(24)
     authorize_url = build_authorize_url(settings, state)
     result = AuthorizationResult()
-    bind_host = settings.runtime.auth_bind_host or redirect_uri.hostname
+    bind_host = settings.runtime.auth_bind_host or _default_callback_bind_host(redirect_uri.hostname)
     server = HTTPServer((bind_host, redirect_uri.port), _make_handler(result))
     worker = threading.Thread(target=server.handle_request, daemon=True)
     worker.start()
@@ -155,6 +158,12 @@ def authorize(settings: AppSettings, timeout_seconds: int = 180) -> TokenData:
             "redirect_uri": settings.spotify.redirect_uri,
         },
     )
+
+
+def _default_callback_bind_host(hostname: str) -> str:
+    if hostname in {"127.0.0.1", "localhost"}:
+        return hostname
+    return "0.0.0.0"
 
 
 def refresh_access_token(settings: AppSettings, token: TokenData) -> TokenData:

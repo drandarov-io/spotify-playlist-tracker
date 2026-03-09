@@ -55,3 +55,14 @@ def test_settings_default_auth_file_can_live_in_state_directory(monkeypatch, tmp
     settings = AppSettings.load(tmp_path)
 
     assert settings.paths.token_file == (tmp_path / "state" / ".auth").resolve()
+
+
+def test_settings_default_schedule_is_daily(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "client")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_IDS", "playlist-a")
+    monkeypatch.delenv("TRACKER_SCHEDULE", raising=False)
+
+    settings = AppSettings.load(tmp_path)
+
+    assert settings.runtime.schedule == "daily"

@@ -107,9 +107,6 @@ def run_check(settings: AppSettings, force_summary: bool = False) -> int:
 
 
 def run_scheduled(settings: AppSettings) -> int:
-    if not settings.runtime.schedule:
-        raise SettingsError("TRACKER_SCHEDULE is required for the run command.")
-
     latest_exit_code = run_check(settings)
     while True:
         now = time.time()

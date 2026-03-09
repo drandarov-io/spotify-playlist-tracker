@@ -33,7 +33,7 @@ class PlaylistConfig:
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    schedule: str | None
+    schedule: str
     summary_webhook_url: str | None
     webhook_timeout_seconds: float
     auth_bind_host: str | None
@@ -78,7 +78,7 @@ class AppSettings:
         )
 
         runtime = RuntimeConfig(
-            schedule=_empty_to_none(os.getenv("TRACKER_SCHEDULE")),
+            schedule=os.getenv("TRACKER_SCHEDULE", "daily").strip() or "daily",
             summary_webhook_url=_validate_optional_url("TRACKER_SUMMARY_WEBHOOK_URL"),
             webhook_timeout_seconds=_parse_positive_float("TRACKER_WEBHOOK_TIMEOUT_SECONDS", 15.0),
             auth_bind_host=_empty_to_none(os.getenv("TRACKER_AUTH_BIND_HOST")),

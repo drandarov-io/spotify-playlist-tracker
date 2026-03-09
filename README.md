@@ -31,7 +31,8 @@ Optional variables:
 
 - `SPOTIFY_REDIRECT_URI`
   Default: `http://127.0.0.1:8899/callback`
-  For a hosted Docker deployment, set this to your public callback URL such as `https://your-server.example.com/callback` or `http://your-server:8899/callback`.
+  For a hosted Docker deployment, set this to your public callback URL such as `http://your-server:8899/callback` or `http://192.168.178.69:8899/callback`.
+  The built-in authorization flow currently requires an explicit port in `SPOTIFY_REDIRECT_URI`.
 - `SPOTIFY_MARKET`
   Default: `US`
 - `SPOTIFY_INCLUDE_EPISODES`
@@ -41,8 +42,9 @@ Optional variables:
 - `TRACKER_AUTH_FILE`
   Default: `state/.auth`
 - `TRACKER_AUTH_BIND_HOST`
-  Optional callback listener bind host. Leave empty for local runs. In Docker Compose this should be `0.0.0.0` while `SPOTIFY_REDIRECT_URI` can remain `http://127.0.0.1:8899/callback`.
+  Optional callback listener bind host. Leave empty for local runs. For hosted or Docker deployments this should usually be `0.0.0.0` so the callback listener accepts inbound requests for your public hostname.
 - `TRACKER_SCHEDULE`
+  Default: `daily`
   Presets: `hourly`, `daily`, `weekly`, `monthly`
   Also supports a standard 5-field cron expression in UTC
 - `TRACKER_SUMMARY_WEBHOOK_URL`
@@ -70,7 +72,7 @@ Behavior:
 
 ### `run`
 
-Runs `check` immediately, then repeats based on `TRACKER_SCHEDULE`. Useful for long-running Docker deployments.
+Runs `check` immediately, then repeats based on `TRACKER_SCHEDULE`. Useful for long-running Docker deployments. If `TRACKER_SCHEDULE` is unset, it defaults to `daily`.
 
 ## Results
 
@@ -86,9 +88,9 @@ Files created per playlist run:
 
 If no auth file is present, the application now self-bootstraps authorization:
 
-1. It logs the Spotify authorization URL! 
+1. It logs the Spotify authorization URL!
     - *IMPORTANT*: You must look at the logs to get this URL and open it in your browser to complete the flow.
-2. It starts the localhost callback listener.
+2. It starts the callback listener.
 3. After Spotify redirects back, it exchanges the authorization code for tokens.
 4. It writes the `.auth` file to `TRACKER_AUTH_FILE`.
 5. It prints the full saved `.auth` JSON to stdout.
@@ -108,9 +110,11 @@ Examples:
 
 - Local run: `http://127.0.0.1:8899/callback`
 - Hosted Docker on a public port: `http://your-server.example.com:8899/callback`
-- Hosted Docker behind TLS and reverse proxy: `https://your-server.example.com/callback`
+- Hosted Docker on a LAN IP: `http://192.168.178.69:8899/callback`
 
 If the callback URL in Spotify does not exactly match `SPOTIFY_REDIRECT_URI`, authorization will fail.
+
+For the built-in authorization listener, `SPOTIFY_REDIRECT_URI` must include an explicit port.
 
 ## Docker
 
@@ -149,13 +153,16 @@ If `.auth` does not exist yet, inspect the container logs, open the logged Spoti
 If the container is running on a remote server instead of your local machine:
 
 1. Set `SPOTIFY_REDIRECT_URI` to the public URL and port that can reach your server.
+   Example hostname: `http://your-server.example.com:8899/callback`
+   Example IP: `http://192.168.178.69:8899/callback`
 2. Add that exact callback URL to the Spotify application's authorized redirect URIs.
 3. Make sure the server port is reachable from your browser and forwarded to the container.
-4. Start the container.
-5. Check the container logs for the generated Spotify authorization URL.
-6. Open that logged URL in your browser from your own machine.
-7. Complete the Spotify login and consent flow.
-8. Let Spotify redirect back to your public server callback URL.
+4. Set `TRACKER_AUTH_BIND_HOST=0.0.0.0` so the callback listener binds on the container/server network interface instead of only localhost.
+5. Start the container.
+6. Check the container logs for the generated Spotify authorization URL.
+7. Open that logged URL in your browser from your own machine.
+8. Complete the Spotify login and consent flow.
+9. Let Spotify redirect back to your public server callback URL.
 
 Important behavior:
 
