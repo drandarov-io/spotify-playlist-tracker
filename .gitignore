@@ -1,0 +1,9 @@
+.env
+.auth
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+state/
+results/
+*.egg-info/

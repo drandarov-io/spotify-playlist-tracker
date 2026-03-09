@@ -1,0 +1,20 @@
+services:
+  spotify-playlist-tracker:
+    build:
+      context: .
+    image: spotify-playlist-tracker:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TRACKER_SCHEDULE: ${TRACKER_SCHEDULE:-daily}
+      TRACKER_RESULTS_DIR: /app/results
+      TRACKER_AUTH_FILE: /app/state/.auth
+      TRACKER_AUTH_BIND_HOST: 0.0.0.0
+      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-http://127.0.0.1:8899/callback}
+    volumes:
+      - ./results:/app/results
+      - ./state:/app/state
+    ports:
+      - "8899:8899"
+    command: ["spotify-playlist-tracker", "run"]
