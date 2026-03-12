@@ -47,7 +47,7 @@ def test_send_summary_webhook_posts_markdown_and_metadata(monkeypatch, tmp_path)
             "| Example | Artist | market | The track is not playable in the configured market `DE`. |\n"
         ),
         snapshot_path=tmp_path / "snapshot.json",
-        diff_path=tmp_path / "diff.json",
+        diff_path=None,
         summary_path=tmp_path / "summary.md",
         timeout_seconds=10.0,
     )
@@ -70,6 +70,7 @@ def test_send_summary_webhook_posts_markdown_and_metadata(monkeypatch, tmp_path)
     assert captured["json"]["html"].count("Playlist Summary: Playlist") == 2
     assert captured["json"]["html"].count("<h1 style=") == 1
     assert captured["json"]["change_counts"]["added"] == 0
+    assert captured["json"]["files"]["diff"] is None
     assert captured["json"]["files"]["summary"]["name"] == "summary.md"
     assert captured["timeout"] == 10.0
 

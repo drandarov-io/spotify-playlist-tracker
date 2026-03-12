@@ -55,6 +55,35 @@ def test_snapshot_store_saves_diff(tmp_path) -> None:
     assert payload["playlist_id"] == "playlist-1"
 
 
+def test_snapshot_store_saves_raw_payload(tmp_path) -> None:
+    store = SnapshotStore(tmp_path)
+
+    path = store.save_raw(
+        "2026-03-09T10:00:00Z",
+        "Playlist",
+        "playlist-1",
+        {"metadata": {"id": "playlist-1"}, "item_pages": [{"items": []}]},
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert path.exists()
+    assert path.name == "2026-03-09T10-00-00Z_playlist_playlist-1_raw.json"
+    assert payload["metadata"]["id"] == "playlist-1"
+
+
+def test_snapshot_store_saves_unavailable_summary_markdown(tmp_path) -> None:
+    store = SnapshotStore(tmp_path)
+
+    path = store.save_unavailable_summary_markdown(
+        "2026-03-09T10:00:00Z",
+        "Playlist",
+        "playlist-1",
+        "# Title\n",
+    )
+
+    assert path.exists()
+    assert path.name == "2026-03-09T10-00-00Z_playlist_playlist-1_unavailable_summary.md"
+    assert path.read_text(encoding="utf-8") == "# Title\n"
 def test_snapshot_store_saves_summary_markdown(tmp_path) -> None:
     store = SnapshotStore(tmp_path)
     snapshot = PlaylistSnapshot(
@@ -94,3 +123,19 @@ def test_snapshot_store_saves_summary_markdown(tmp_path) -> None:
     assert "## Diff Summary" in content
     assert "## Currently Unavailable Songs" in content
     assert "configured market `US`" in content
+
+
+def test_snapshot_store_saves_unavailable_summary_json(tmp_path) -> None:
+    store = SnapshotStore(tmp_path)
+
+    path = store.save_unavailable_summary(
+        "2026-03-09T10:00:00Z",
+        "Playlist",
+        "playlist-1",
+        {"playlist_id": "playlist-1", "unavailable_count": 1, "items": []},
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert path.exists()
+    assert path.name == "2026-03-09T10-00-00Z_playlist_playlist-1_unavailable_summary.json"
+    assert payload["unavailable_count"] == 1

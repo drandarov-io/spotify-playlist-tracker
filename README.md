@@ -1,21 +1,39 @@
 # Spotify Playlist Tracker
 
-I got annoyed by Spotify randomly disappearing tracks my playlist without a way for me to easily notice or track the changes, so I created this project.
+I got annoyed by Spotify randomly disappearing tracks from my playlist without a way for me to easily notice or track the changes, so I created this project.
 
-This project tracks Spotify playlist changes across repeated runs, stores snapshots and diffs, optionally renders markdown summaries, and can notify an external workflow via webhook (markdown & html for mail). It is designed to run either locally or inside Docker.
+Tracks Spotify playlist changes across repeated runs, stores normalized snapshots, raw Spotify payloads, and diffs, optionally renders markdown summaries, and can notify via webhook (markdown & HTML payload, useful for email via n8n or similar). Designed to run locally or inside Docker.
 
 > Disclaimer: Quick, vibe-coded prototype for personal use.
 
 ## What It Does
 
-- Fetches playlist items for the configured Spotify playlist IDs.
-- Saves one snapshot JSON and one diff JSON on every run.
-- Creates a markdown summary only on the initial run or when the diff contains removals, reorders, metadata changes, or newly unavailable tracks.
-- Skips markdown summaries when the only changes are added tracks (can force with `--force-summary` parameter).
-- Sends one webhook call per generated summary/playlist when `TRACKER_SUMMARY_WEBHOOK_URL` is configured.
+The main workflow is the **`check`** command. On every run it:
 
-The mail can look something like this:
-![Example email with playlist change summary](docs/banner.png)
+1. Fetches playlist items from the Spotify API for each configured playlist.
+2. Saves a **snapshot** JSON
+3. Compares the current snapshot against the previous one and saves a **diff** JSON when changes are detected.
+4. Creates a **markdown summary** on the initial run or when the diff contains removals, reorders, metadata changes, or newly unavailable tracks. Summaries are skipped when the only changes are added tracks (override with `--force-summary`).
+5. Sends a **webhook** per generated summary when `TRACKER_SUMMARY_WEBHOOK_URL` is configured. The payload includes both markdown and HTML, suitable for email delivery.
+
+The **`run`** command wraps `check` with a schedule loop — it runs `check` immediately, then repeats according to `TRACKER_SCHEDULE`.
+
+Additionally:
+
+- **`checkunavailable`** fetches the current playlist state, finds unavailable tracks, performs batch track metadata lookups, and writes both a JSON and markdown unavailable summary with per-track market availability details.
+- **`authorize`** performs the one-time Spotify OAuth2 flow and saves the token file.
+
+The webhook-delivered email can look something like this:
+
+![Example email with playlist change summary](docs/banner1.png)
+
+---
+
+![Example email with playlist change summary](docs/banner2.png)
+
+---
+
+![Example email with playlist change summary](docs/banner3.png)
 
 ## Runtime Configuration
 
@@ -56,23 +74,32 @@ Example `.env` values are provided in `.env.example`.
 
 ## Commands
 
-### `authorize`
-
-Starts the Spotify authorization flow, saves the resulting token JSON to `TRACKER_AUTH_FILE`, and prints the saved `.auth` contents to stdout.
-
 ### `check`
 
-Runs a single tracker pass.
+The main command. Runs a single tracker pass: fetch → snapshot → diff → summary → webhook.
 
-Behavior:
+Parameters:
 
-- If the auth file already exists, it uses or refreshes it.
-- If the auth file does not exist, it logs the Spotify authorization URL, waits for the callback, saves `.auth`, prints the saved `.auth` JSON to stdout, and then continues.
-- `--force-summary` forces summary creation even if only added tracks are present or no change at all.
+| Flag | Effect |
+| ---- | ------ |
+| `--force-summary` | Create a markdown summary even when only additions were detected or nothing changed |
+| `--raw-output` | Print the full diff report as JSON (change fields, reasons, file paths) instead of the default artifact-path log |
+
+Auth behavior: if the auth file already exists, it uses or refreshes it. If it does not exist, it logs the Spotify authorization URL, waits for the callback, saves `.auth`, prints the token JSON to stdout, and continues with the check.
 
 ### `run`
 
-Runs `check` immediately, then repeats based on `TRACKER_SCHEDULE`. Useful for long-running Docker deployments. If `TRACKER_SCHEDULE` is unset, it defaults to `daily`.
+Wraps `check` with a schedule loop. Runs `check` immediately, then repeats according to `TRACKER_SCHEDULE` (default: `daily`). Useful for long-running Docker deployments.
+
+### `authorize`
+
+Performs the Spotify OAuth2 flow, saves the resulting token JSON to `TRACKER_AUTH_FILE`, and prints the saved `.auth` contents to stdout. Use this for one-time token setup before running `check` or `run`.
+
+### `checkunavailable`
+
+Fetches the current playlist state, finds tracks Spotify marks as unavailable, performs batched track metadata lookups to collect `available_markets` and related metadata for those track IDs, and writes both a `*_unavailable_summary.json` and a `*_unavailable_summary.md` table.
+
+Does not create snapshot, raw, or diff artifacts — only the unavailable summary files.
 
 ## Results
 
@@ -81,8 +108,13 @@ Results are written to `TRACKER_RESULTS_DIR`. Should be mounted as a volume in D
 Files created per playlist run:
 
 - `date_playlistname_playlistid_snapshot.json`
-- `date_playlistname_playlistid_diff.json`
+- `date_playlistname_playlistid_diff.json` only when changes were detected
 - `date_playlistname_playlistid_summary.md` when summary creation rules are met
+
+- Additionaly:
+  - `date_playlistname_playlistid_raw.json` when using `check` with `--raw-output`
+  - `date_playlistname_playlistid_unavailable_summary.json` when using `checkunavailable`
+  - `date_playlistname_playlistid_unavailable_summary.md` when using `checkunavailable`
 
 ## Auth Bootstrap Without a Preexisting `.auth`
 
@@ -109,11 +141,12 @@ Before using the authorization flow:
 Examples:
 
 - Local run: `http://127.0.0.1:8899/callback`
-- Hosted Docker on a public port: `http://your-server.example.com:8899/callback`
-- Hosted Docker on a LAN IP: `http://192.168.178.69:8899/callback`
+- Hosted Docker on a public port: `https://your-server.example.com:8899/callback`
+- Hosted Docker on a LAN IP: `https://192.168.178.69:8899/callback`
+
+> Note, that Spotify's authorization flow has certain restrictions about the redirect URI.
 
 If the callback URL in Spotify does not exactly match `SPOTIFY_REDIRECT_URI`, authorization will fail.
-
 For the built-in authorization listener, `SPOTIFY_REDIRECT_URI` must include an explicit port.
 
 ## Docker
@@ -195,11 +228,11 @@ This is suitable for n8n workflows that want to send either the markdown or the 
 
 ## GitHub Action
 
-The workflow at `.github/workflows/docker-image.yml` builds and publishes the Docker image to GitHub Container Registry on pushes to `main`.
+The workflow at `.github/workflows/docker-image.yml` builds and publishes the Docker image to GitHub Container Registry.
 
-Registry target:
+Triggers: pushes to `main` or `master`, version tags (`v*`), and manual dispatch.
 
-- `ghcr.io/<owner>/<repo>`
+Registry target: `ghcr.io/<owner>/<repo>`
 
 ## Local Development
 
@@ -214,4 +247,65 @@ Run tests with:
 
 ```sh
 python -m pytest -q
+```
+
+## Architecture
+
+```mermaid
+graph TD
+    subgraph Entry
+        main["__main__"]
+    end
+
+    subgraph Orchestration
+        cli
+    end
+
+    subgraph Domain["Domain Services"]
+        auth
+        spotify_api
+        diff
+        storage
+        scheduler
+        webhook
+    end
+
+    subgraph Foundation
+        models
+        settings
+    end
+
+    subgraph External["External Libraries"]
+        httpx
+        croniter
+        python_dotenv["python-dotenv"]
+        markdown_lib["Markdown"]
+    end
+
+    main --> cli
+
+    cli --> auth
+    cli --> diff
+    cli --> models
+    cli --> settings
+    cli --> scheduler
+    cli --> spotify_api
+    cli --> storage
+    cli --> webhook
+
+    auth --> models
+    auth --> settings
+    spotify_api --> models
+    spotify_api --> settings
+    diff --> models
+    storage --> models
+    scheduler --> models
+    webhook --> models
+
+    settings -.-> python_dotenv
+    auth -.-> httpx
+    spotify_api -.-> httpx
+    scheduler -.-> croniter
+    webhook -.-> httpx
+    webhook -.-> markdown_lib
 ```

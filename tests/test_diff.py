@@ -61,6 +61,48 @@ def test_compare_snapshots_detects_unavailable_and_metadata_change() -> None:
     assert report.unavailable[0].after["availability_status"] == "market"
 
 
+def test_format_markdown_shows_exact_changed_values() -> None:
+    previous = make_snapshot(make_entry(254, "a", name="Before Song", playable=True))
+    current = make_snapshot(
+        make_entry(254, "a", name="Before Song", playable=False, restriction="market"),
+        fetched_at="2026-03-10T00:00:00Z",
+    )
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current)
+
+    assert "positions 254 -> 254" in content
+    assert "is_playable: true -> false" in content
+    assert "restriction_reason: none -> market" in content
+    assert "availability_status: available -> market" in content
+
+
+def test_format_markdown_shows_exact_artist_list_change() -> None:
+    previous = make_snapshot(make_entry(141, "a", name="Song"))
+    current_entry = PlaylistEntry(
+        position=141,
+        item_type="track",
+        spotify_id="a",
+        uri="spotify:track:a",
+        name="Song",
+        artists=("Artist One", "Artist Two"),
+        album="Album",
+        duration_ms=180000,
+        explicit=False,
+        is_local=False,
+        added_at="2026-03-09T00:00:00Z",
+        added_by="user",
+        is_playable=True,
+        restriction_reason=None,
+    )
+    current = make_snapshot(current_entry, fetched_at="2026-03-10T00:00:00Z")
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current)
+
+    assert "artists: Artist -> Artist One, Artist Two" in content
+
+
 def test_compare_snapshots_handles_initial_run() -> None:
     current = make_snapshot(make_entry(0, "a"))
 

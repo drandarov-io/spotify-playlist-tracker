@@ -20,7 +20,7 @@ def send_summary_webhook(
     report: DiffReport,
     markdown: str,
     snapshot_path: Path,
-    diff_path: Path,
+    diff_path: Path | None,
     summary_path: Path,
     timeout_seconds: float,
 ) -> None:
@@ -37,7 +37,7 @@ def send_summary_webhook(
         "change_counts": report.to_dict()["summary"],
         "files": {
             "snapshot": {"name": snapshot_path.name, "path": str(snapshot_path)},
-            "diff": {"name": diff_path.name, "path": str(diff_path)},
+            "diff": None if diff_path is None else {"name": diff_path.name, "path": str(diff_path)},
             "summary": {"name": summary_path.name, "path": str(summary_path)},
         },
         "markdown": markdown,

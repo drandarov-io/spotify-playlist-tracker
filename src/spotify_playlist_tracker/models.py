@@ -360,7 +360,7 @@ class DiffReport:
                     f"positions {change.before_position if change.before_position is not None else '-'} -> {change.after_position if change.after_position is not None else '-'}"
                 )
             if include_fields and change.changed_fields:
-                detail_parts.append("changed: " + ", ".join(change.changed_fields))
+                detail_parts.append("changes: " + "; ".join(_format_changed_field_values(change)))
             if include_reason:
                 reason = item.get("availability_status") or item.get("restriction_reason") or "unknown"
                 detail_parts.append(str(reason))
@@ -372,6 +372,31 @@ class DiffReport:
 
 def _markdown_escape(value: str) -> str:
     return value.replace("|", "\\|")
+
+
+def _format_changed_field_values(change: DiffChange) -> list[str]:
+    details: list[str] = []
+    before = change.before or {}
+    after = change.after or {}
+    for field_name in change.changed_fields:
+        before_value = _format_change_value(before.get(field_name))
+        after_value = _format_change_value(after.get(field_name))
+        details.append(
+            f"{field_name}: {_markdown_escape(before_value)} -> {_markdown_escape(after_value)}"
+        )
+    return details
+
+
+def _format_change_value(value: Any) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value) if value else "none"
+    if value == "":
+        return "empty"
+    return str(value)
 
 
 def _availability_explanation(reason: str, market: str, linked_from_id: str | None, is_playable: bool | None) -> str:

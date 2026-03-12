@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from .models import DiffReport, PlaylistSnapshot
 
@@ -19,7 +20,19 @@ class SnapshotStore:
             "snapshot",
             ".json",
         )
-        target.write_text(json.dumps(snapshot.to_dict(), indent=2), encoding="utf-8")
+        target.write_text(json.dumps(snapshot.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        return target
+
+    def save_raw(self, fetched_at: str, playlist_name: str, playlist_id: str, payload: dict[str, Any]) -> Path:
+        self._results_dir.mkdir(parents=True, exist_ok=True)
+        target = self._results_dir / _build_filename(
+            fetched_at,
+            playlist_name,
+            playlist_id,
+            "raw",
+            ".json",
+        )
+        target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         return target
 
     def load_latest_snapshot(self, playlist_id: str) -> PlaylistSnapshot | None:
@@ -43,7 +56,7 @@ class SnapshotStore:
             "diff",
             ".json",
         )
-        target.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+        target.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
         return target
 
     def save_summary(self, report: DiffReport, snapshot: PlaylistSnapshot) -> Path:
@@ -56,6 +69,30 @@ class SnapshotStore:
             ".md",
         )
         target.write_text(report.format_markdown(snapshot), encoding="utf-8")
+        return target
+
+    def save_unavailable_summary(self, generated_at: str, playlist_name: str, playlist_id: str, payload: dict[str, Any]) -> Path:
+        self._results_dir.mkdir(parents=True, exist_ok=True)
+        target = self._results_dir / _build_filename(
+            generated_at,
+            playlist_name,
+            playlist_id,
+            "unavailable_summary",
+            ".json",
+        )
+        target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        return target
+
+    def save_unavailable_summary_markdown(self, generated_at: str, playlist_name: str, playlist_id: str, content: str) -> Path:
+        self._results_dir.mkdir(parents=True, exist_ok=True)
+        target = self._results_dir / _build_filename(
+            generated_at,
+            playlist_name,
+            playlist_id,
+            "unavailable_summary",
+            ".md",
+        )
+        target.write_text(content, encoding="utf-8")
         return target
 
 
