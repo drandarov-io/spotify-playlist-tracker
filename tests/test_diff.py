@@ -34,8 +34,8 @@ def make_snapshot(*entries: PlaylistEntry, fetched_at: str = "2026-03-09T00:00:0
 
 
 def test_compare_snapshots_detects_add_remove_and_reorder() -> None:
-    previous = make_snapshot(make_entry(0, "a"), make_entry(1, "b"))
-    current = make_snapshot(make_entry(0, "b"), make_entry(1, "c"), fetched_at="2026-03-10T00:00:00Z")
+    previous = make_snapshot(make_entry(0, "a", name="Alpha"), make_entry(1, "b"))
+    current = make_snapshot(make_entry(0, "b"), make_entry(1, "c", name="Gamma"), fetched_at="2026-03-10T00:00:00Z")
 
     report = compare_snapshots(previous, current)
 
@@ -145,3 +145,57 @@ def test_force_summary_overrides_no_change_behavior() -> None:
     assert report.has_changes is False
     assert report.should_create_summary is False
     assert report.should_create_summary_for(True) is True
+
+
+def test_relinked_track_shows_as_changed_not_added_removed() -> None:
+    """When Spotify relinks a track to a new ID but name+artists stay the same,
+    it should appear as Changed (not as a Remove + Add pair)."""
+    previous = make_snapshot(
+        make_entry(0, "old-id", name="No Pasaran!!!", playable=False, restriction="market"),
+    )
+    current = make_snapshot(
+        make_entry(0, "new-id", name="No Pasaran!!!", playable=True),
+        fetched_at="2026-03-10T00:00:00Z",
+    )
+
+    report = compare_snapshots(previous, current)
+
+    assert len(report.added) == 0
+    assert len(report.removed) == 0
+    assert len(report.changed) == 1
+    assert "spotify_id" in report.changed[0].changed_fields
+    assert report.changed[0].before["spotify_id"] == "old-id"
+    assert report.changed[0].after["spotify_id"] == "new-id"
+
+
+def test_relinked_track_detected_as_unavailable_when_applicable() -> None:
+    """A relinked track that transitions to unavailable should also appear in unavailable."""
+    previous = make_snapshot(
+        make_entry(0, "old-id", name="Song", playable=True),
+    )
+    current = make_snapshot(
+        make_entry(0, "new-id", name="Song", playable=False, restriction="market"),
+        fetched_at="2026-03-10T00:00:00Z",
+    )
+
+    report = compare_snapshots(previous, current)
+
+    assert len(report.added) == 0
+    assert len(report.removed) == 0
+    assert len(report.changed) == 1
+    assert len(report.unavailable) == 1
+
+
+def test_different_name_different_id_still_shows_as_added_removed() -> None:
+    """Tracks with different IDs AND different names should remain as Add + Remove."""
+    previous = make_snapshot(make_entry(0, "old-id", name="Old Song"))
+    current = make_snapshot(
+        make_entry(0, "new-id", name="New Song"),
+        fetched_at="2026-03-10T00:00:00Z",
+    )
+
+    report = compare_snapshots(previous, current)
+
+    assert len(report.added) == 1
+    assert len(report.removed) == 1
+    assert len(report.changed) == 0

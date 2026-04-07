@@ -4,7 +4,7 @@ I got annoyed by Spotify randomly disappearing tracks from my playlist without a
 
 Tracks Spotify playlist changes across repeated runs, stores normalized snapshots, raw Spotify payloads, and diffs, optionally renders markdown summaries, and can notify via webhook (markdown & HTML payload, useful for email via n8n or similar). Designed to run locally or inside Docker.
 
-> Disclaimer: Quick, vibe-coded prototype for personal use.
+> Disclaimer: Quick, vibe-coded prototype for personal use. Do NOT rely on this code.
 
 ## What It Does
 
@@ -248,6 +248,148 @@ Run tests with:
 ```sh
 python -m pytest -q
 ```
+
+## Scripts
+
+Standalone scripts for bulk-importing tracks into Spotify playlists from Last.fm CSV exports. These are separate from the main tracker application and operate on JSON payload files.
+
+### `scripts/create_playlist_from_payload.py`
+
+Searches Spotify for each candidate in a payload file, scores results using normalised text matching, and adds resolved tracks to a new or existing playlist. Produces a JSON report with resolved URIs and unresolved entries.
+
+Includes retry logic with exponential backoff, Retry-After compliance, and a configurable circuit breaker that halts the run when transient error rates spike.
+
+**Payload structure** — the input JSON must contain an `ordered_candidates` array:
+
+```json
+{
+  "ordered_candidates": [
+    {
+      "search_query": "track:\"Song Title\" artist:\"Artist Name\"",
+      "listen_count": 42
+    }
+  ]
+}
+```
+
+Each candidate needs at minimum a `search_query` string in `track:"..." artist:"..."` format.
+
+**Basic usage:**
+
+```sh
+# New playlist from payload
+python scripts/create_playlist_from_payload.py \
+  --payload results/my_payload.json \
+  --name "My Playlist"
+
+# Append to existing playlist
+python scripts/create_playlist_from_payload.py \
+  --payload results/my_payload.json \
+  --playlist-id <spotify-playlist-id>
+
+# Retry only unresolved entries from a previous report
+python scripts/create_playlist_from_payload.py \
+  --payload results/my_payload.json \
+  --playlist-id <spotify-playlist-id> \
+  --unresolved-report results/2026-03-17T19-41-45Z_playlist_import_report.json
+```
+
+**Parameters:**
+
+| Flag | Description |
+| ---- | ----------- |
+| `--payload` | **(required)** Path to payload JSON containing `ordered_candidates[]`. |
+| `--playlist-id` | Existing Spotify playlist ID to append matched tracks to. |
+| `--name` | Playlist name when creating a new playlist (required if `--playlist-id` is not set). |
+| `--unresolved-report` | Path to a prior import report. When set, only unresolved entries are retried. |
+| `--description` | Playlist description for new playlists. |
+| `--public` | Create the playlist as public. |
+| `--max-candidates` | Limit processing to the first N candidates. |
+| `--min-listen-count` | Skip candidates with `listen_count` below this value. |
+| `--test-run` | Process N candidates without modifying the playlist. Outputs a `*_test_run_report.json`. |
+| `--results-dir` | Output directory for the report JSON. |
+| `--log-interval` | Progress logging frequency. |
+| `--circuit-window` | Circuit breaker rolling window size. |
+| `--circuit-error-rate` | Error rate threshold to open the circuit. |
+| `--circuit-min-errors` | Minimum errors in window before the circuit can open. |
+
+Requires `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in `.env` or environment. Uses `state/.auth` for token persistence.
+
+**Import report structure:**
+
+The output report JSON contains top-level metadata, counts, and two arrays — `resolved` and `unresolved`.
+
+Resolved entry example:
+
+```json
+{
+  "index": 42,
+  "query": "track:\"Song Title\" artist:\"Artist Name\"",
+  "listen_count": 7,
+  "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+  "matched_query": "track:\"Song Title\" artist:\"Artist Name\"",
+  "score": 100,
+  "track_name": "Song Title",
+  "artists": "Artist Name"
+}
+```
+
+- `matched_query` — the fallback query that produced the match (may differ from the original query when title compaction or artist splitting was applied).
+- `score` — match score (70 = exact track name, 40 = substring, +30 for artist match). Minimum qualifying score is 70.
+
+Unresolved entry example (no match):
+
+```json
+{
+  "index": 55,
+  "reason": "no-match",
+  "query": "track:\"Unknown Track\" artist:\"Some Artist\"",
+  "listen_count": 3,
+  "fallback_queries": [
+    "track:\"Unknown Track\" artist:\"Some Artist\"",
+    "track:\"Unknown Track\""
+  ],
+  "highest_score": 40,
+  "highest_scored_match": {
+    "query": "track:\"Unknown Track\" artist:\"Some Artist\"",
+    "score": 40,
+    "track_name": "Unknown Track (Deluxe)",
+    "artists": "Different Artist",
+    "uri": "spotify:track:1ABC..."
+  }
+}
+```
+
+- `fallback_queries` — all search queries attempted.
+- `highest_score` / `highest_scored_match` — the best candidate that did not meet the minimum score threshold. Present only when Spotify returned at least one result. Useful for investigating near-misses.
+
+### `scripts/cross_reference.py`
+
+Cross-references an import report's unresolved entries against playlist snapshots and generates a markdown file grouping missing tracks by artist, sorted by total play count.
+
+Auto-discovers the latest import report and the most recent snapshot per playlist from the results directory. Both can be overridden via CLI.
+
+**Basic usage:**
+
+```sh
+# Auto-discover latest report and snapshots
+python scripts/cross_reference.py
+
+# Explicit report and output path
+python scripts/cross_reference.py \
+  --report results/2026-03-17T19-41-45Z_playlist_import_report.json \
+  --output results/missing.md
+```
+
+**Parameters:**
+
+| Flag | Description |
+| ---- | ----------- |
+| `--payload` | Path to payload JSON. Optional — listen counts are read from the import report if available. |
+| `--report` | Path to an import report JSON. Defaults to the latest `*_playlist_import_report.json` in `--results-dir`. |
+| `--snapshots` | One or more snapshot JSON paths. Defaults to auto-discovering the latest snapshot per playlist. |
+| `--results-dir` | Base directory for auto-discovery. |
+| `--output` | Output markdown path. |
 
 ## Architecture
 
