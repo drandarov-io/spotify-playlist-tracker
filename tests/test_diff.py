@@ -72,9 +72,21 @@ def test_format_markdown_shows_exact_changed_values() -> None:
     content = report.format_markdown(current)
 
     assert "positions 254 -> 254" in content
+    assert "  - changes: is_playable: true -> false" in content
     assert "is_playable: true -> false" in content
     assert "restriction_reason: none -> market" in content
     assert "availability_status: available -> market" in content
+
+
+def test_format_markdown_hides_reordered_section_when_requested() -> None:
+    previous = make_snapshot(make_entry(0, "a"), make_entry(1, "b"))
+    current = make_snapshot(make_entry(0, "b"), make_entry(1, "a"), fetched_at="2026-03-10T00:00:00Z")
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current, hide_reordered=True)
+
+    assert "| Reordered | 2 |" in content
+    assert "## Reordered" not in content
 
 
 def test_format_markdown_shows_exact_artist_list_change() -> None:

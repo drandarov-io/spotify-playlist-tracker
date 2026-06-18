@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from spotify_playlist_tracker.models import DiffReport
-from spotify_playlist_tracker.webhook import WebhookError, send_summary_webhook
+from spotify_playlist_tracker.webhook import WebhookError, send_failure_webhook, send_summary_webhook
 
 
 class DummyResponse:
@@ -101,3 +101,30 @@ def test_send_summary_webhook_raises_for_failure(monkeypatch, tmp_path) -> None:
             summary_path=tmp_path / "summary.md",
             timeout_seconds=10.0,
         )
+
+
+def test_send_failure_webhook_posts_markdown(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["timeout"] = timeout
+        return DummyResponse(200)
+
+    monkeypatch.setattr("spotify_playlist_tracker.webhook.httpx.post", fake_post)
+
+    send_failure_webhook(
+        webhook_url="https://example.test/hook",
+        title="Failure",
+        subtitle="Refresh token expired",
+        markdown="# WARNING\n\nAuthentication failed.",
+        timeout_seconds=7.0,
+        metadata={"kind": "auth"},
+    )
+
+    assert captured["url"] == "https://example.test/hook"
+    assert captured["json"]["event_type"] == "failure"
+    assert "Authentication failed" in captured["json"]["markdown"]
+    assert captured["json"]["html"].startswith("<!DOCTYPE html>")
+    assert captured["timeout"] == 7.0

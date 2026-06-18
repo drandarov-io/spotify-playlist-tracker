@@ -14,6 +14,7 @@ def test_settings_load_from_environment(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TRACKER_SCHEDULE", "daily")
     monkeypatch.setenv("TRACKER_SUMMARY_WEBHOOK_URL", "https://example.test/hook")
     monkeypatch.setenv("TRACKER_WEBHOOK_TIMEOUT_SECONDS", "12")
+    monkeypatch.setenv("HIDE_REORDERED", "true")
 
     settings = AppSettings.load(tmp_path)
 
@@ -25,6 +26,7 @@ def test_settings_load_from_environment(monkeypatch, tmp_path) -> None:
     assert settings.runtime.schedule == "daily"
     assert settings.runtime.summary_webhook_url == "https://example.test/hook"
     assert settings.runtime.webhook_timeout_seconds == 12.0
+    assert settings.runtime.hide_reordered_section is True
 
 
 def test_settings_require_playlist_ids_for_check(monkeypatch, tmp_path) -> None:

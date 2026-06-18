@@ -1,6 +1,9 @@
 import json
 
+import pytest
+
 from spotify_playlist_tracker.cli import build_parser, run_check
+from spotify_playlist_tracker.auth import AuthError
 from spotify_playlist_tracker.models import DiffReport, PlaylistEntry, PlaylistSnapshot, TokenData
 from spotify_playlist_tracker.settings import AppSettings, PathConfig, PlaylistConfig, RuntimeConfig, SpotifyCredentials
 
@@ -46,6 +49,37 @@ def test_checkunavailable_parser_selects_command() -> None:
     args = parser.parse_args(["checkunavailable"])
 
     assert args.command == "checkunavailable"
+
+
+def test_run_check_sends_failure_webhook_when_refresh_fails(monkeypatch, tmp_path) -> None:
+    settings = build_settings(tmp_path)
+    settings = AppSettings(
+        spotify=settings.spotify,
+        playlists=settings.playlists,
+        runtime=RuntimeConfig(
+            schedule="daily",
+            summary_webhook_url="https://example.test/hook",
+            webhook_timeout_seconds=15.0,
+            auth_bind_host=None,
+            hide_reordered_section=False,
+        ),
+        paths=settings.paths,
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_failure_webhook(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("spotify_playlist_tracker.cli.get_valid_token", lambda *_args, **_kwargs: (_ for _ in ()).throw(AuthError("invalid_grant")))
+    monkeypatch.setattr("spotify_playlist_tracker.cli.send_failure_webhook", fake_failure_webhook)
+
+    exit_code = run_check(settings)
+
+    assert exit_code == 1
+    assert captured["webhook_url"] == "https://example.test/hook"
+    assert "invalid_grant" in captured["markdown"]
+    assert "refresh token has expired or is invalid" in captured["markdown"]
 
 
 def test_run_check_skips_diff_file_and_emits_raw_output_when_no_changes(monkeypatch, tmp_path, capsys) -> None:

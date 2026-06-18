@@ -260,7 +260,7 @@ class DiffReport:
 
         return "\n".join(lines)
 
-    def format_markdown(self, snapshot: PlaylistSnapshot) -> str:
+    def format_markdown(self, snapshot: PlaylistSnapshot, hide_reordered: bool = False) -> str:
         lines = [
             f"# Playlist Summary: {self.playlist_name}",
             "",
@@ -307,7 +307,8 @@ class DiffReport:
         else:
             lines.extend(self._format_markdown_change_section("Added", self.added))
             lines.extend(self._format_markdown_change_section("Removed", self.removed))
-            lines.extend(self._format_markdown_change_section("Reordered", self.reordered))
+            if not hide_reordered:
+                lines.extend(self._format_markdown_change_section("Reordered", self.reordered))
             lines.extend(self._format_markdown_change_section("Changed", self.changed, include_fields=True))
             lines.extend(self._format_markdown_change_section("Newly Unavailable", self.unavailable, include_reason=True))
 
@@ -354,17 +355,21 @@ class DiffReport:
             item = change.after or change.before or {}
             name = _markdown_escape(item.get("name") or "Unknown")
             artists = _markdown_escape(", ".join(item.get("artists", [])) or "Unknown")
-            detail_parts = [f"{name} - {artists}"]
+            lines.append(f"- {name} - {artists};")
+
             if change.before_position is not None or change.after_position is not None:
-                detail_parts.append(
-                    f"positions {change.before_position if change.before_position is not None else '-'} -> {change.after_position if change.after_position is not None else '-'}"
-                )
+                before_position = change.before_position if change.before_position is not None else "-"
+                after_position = change.after_position if change.after_position is not None else "-"
+                lines.append(f"  - positions {before_position} -> {after_position}")
+
             if include_fields and change.changed_fields:
-                detail_parts.append("changes: " + "; ".join(_format_changed_field_values(change)))
+                for index, field_change in enumerate(_format_changed_field_values(change)):
+                    prefix = "changes: " if index == 0 else ""
+                    lines.append(f"  - {prefix}{field_change}")
+
             if include_reason:
                 reason = item.get("availability_status") or item.get("restriction_reason") or "unknown"
-                detail_parts.append(str(reason))
-            lines.append(f"- {'; '.join(detail_parts)}")
+                lines.append(f"  - reason: {_markdown_escape(str(reason))}")
 
         lines.append("")
         return lines

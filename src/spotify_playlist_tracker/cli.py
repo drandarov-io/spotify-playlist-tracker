@@ -13,7 +13,7 @@ from .settings import AppSettings, SettingsError
 from .scheduler import ScheduleError, next_run_after
 from .spotify_api import SpotifyApiError, SpotifyClient
 from .storage import SnapshotStore
-from .webhook import WebhookError, send_summary_webhook
+from .webhook import WebhookError, send_failure_webhook, send_summary_webhook
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,8 +77,14 @@ def main(argv: list[str] | None = None) -> int:
 
 def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bool = False) -> int:
     token_store = TokenStore(settings.paths.token_file)
-    token = get_valid_token(settings, token_store)
     snapshot_store = SnapshotStore(settings.paths.results_dir)
+
+    try:
+        token = get_valid_token(settings, token_store)
+    except AuthError as error:
+        print(f"Authentication failed: {error}", file=sys.stderr)
+        _send_auth_failure_webhook(settings, str(error))
+        return 1
 
     had_errors = False
     with SpotifyClient(settings, token.access_token) as client:
@@ -94,7 +100,11 @@ def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bo
                 summary_path = None
 
                 if report.should_create_summary_for(force_summary):
-                    summary_path = snapshot_store.save_summary(report, current)
+                    summary_path = snapshot_store.save_summary(
+                        report,
+                        current,
+                        hide_reordered=settings.runtime.hide_reordered_section,
+                    )
                     if settings.runtime.summary_webhook_url:
                         markdown = summary_path.read_text(encoding="utf-8")
                         send_summary_webhook(
@@ -146,6 +156,47 @@ def run_scheduled(settings: AppSettings) -> int:
         print(f"Next scheduled run at {next_run.isoformat().replace('+00:00', 'Z')}")
         time.sleep(sleep_seconds)
         latest_exit_code = run_check(settings)
+
+
+def _send_auth_failure_webhook(settings: AppSettings, error_message: str) -> None:
+    if not settings.runtime.summary_webhook_url:
+        return
+
+    playlist_ids = ", ".join(settings.playlists.playlist_ids) if settings.playlists.playlist_ids else "none"
+    markdown = "\n".join(
+        [
+            "# WARNING: Spotify refresh token has expired or is invalid",
+            "",
+            "The tracker could not refresh the Spotify access token, so playlist fetch did not run.",
+            "",
+            "## Details",
+            "",
+            f"- Error: `{error_message}`",
+            f"- Playlist IDs: `{playlist_ids}`",
+            f"- Auth file: `{settings.paths.token_file}`",
+            "",
+            "## Action required",
+            "",
+            "Run `spotify-playlist-tracker authorize` on a machine where you can complete Spotify login and then redeploy the updated auth file to the server.",
+            "",
+        ]
+    )
+
+    try:
+        send_failure_webhook(
+            webhook_url=settings.runtime.summary_webhook_url,
+            title="Spotify Tracker Authentication Failure",
+            subtitle="Refresh token expired or invalid",
+            markdown=markdown,
+            timeout_seconds=settings.runtime.webhook_timeout_seconds,
+            metadata={
+                "error": error_message,
+                "auth_file": str(settings.paths.token_file),
+                "playlist_ids": list(settings.playlists.playlist_ids),
+            },
+        )
+    except WebhookError as webhook_error:
+        print(f"Failed to deliver auth failure webhook: {webhook_error}", file=sys.stderr)
 
 
 def run_check_unavailable(settings: AppSettings) -> int:

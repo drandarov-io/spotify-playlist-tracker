@@ -53,6 +53,35 @@ def send_summary_webhook(
         raise WebhookError(f"Summary webhook returned HTTP {response.status_code}: {response.text}")
 
 
+def send_failure_webhook(
+    *,
+    webhook_url: str,
+    title: str,
+    subtitle: str,
+    markdown: str,
+    timeout_seconds: float,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    html_body = render_markdown(markdown, extensions=["tables", "sane_lists"])
+    html = _build_generic_email_html(title=title, subtitle=subtitle, html_body=html_body)
+    payload = {
+        "event_type": "failure",
+        "title": title,
+        "subtitle": subtitle,
+        "markdown": markdown,
+        "html": html,
+        "metadata": metadata or {},
+    }
+
+    try:
+        response = httpx.post(webhook_url, json=payload, timeout=timeout_seconds)
+    except httpx.HTTPError as error:
+        raise WebhookError(f"Failure webhook request failed: {error}") from error
+
+    if response.status_code >= 400:
+        raise WebhookError(f"Failure webhook returned HTTP {response.status_code}: {response.text}")
+
+
 def _build_email_html(report: DiffReport, html_body: str) -> str:
     html_body = _enhance_email_html(_remove_duplicate_title(html_body))
     title = escape(f"Playlist Summary: {report.playlist_name}")
@@ -72,6 +101,33 @@ def _build_email_html(report: DiffReport, html_body: str) -> str:
                 <div style=\"font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:#475467;margin-bottom:10px;\">Spotify Playlist Tracker</div>
                 <h1 style=\"margin:0;font-size:34px;line-height:1.15;font-weight:700;color:#101828;\">{title}</h1>
                 <p style=\"margin:8px 0 0;font-size:14px;line-height:1.5;color:#475467;\">{subtitle}</p>
+            </div>
+            <div>{html_body}</div>
+        </div>
+    </body>
+</html>
+"""
+
+
+def _build_generic_email_html(*, title: str, subtitle: str, html_body: str) -> str:
+    html_body = _enhance_email_html(_remove_duplicate_title(html_body))
+    safe_title = escape(title)
+    safe_subtitle = escape(subtitle)
+    return f"""<!DOCTYPE html>
+<html lang=\"en\">
+    <head>
+        <meta charset=\"utf-8\">
+        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+        <meta name=\"color-scheme\" content=\"light\">
+        <meta name=\"supported-color-schemes\" content=\"light\">
+        <title>{safe_title}</title>
+    </head>
+    <body bgcolor=\"#ffffff\" style=\"margin:0;padding:24px;background-color:#ffffff;color:#111827;font-family:Arial,Helvetica,sans-serif;\">
+        <div style=\"width:100%;margin:0;\">
+            <div style=\"padding:8px 0 22px;\">
+                <div style=\"font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:#475467;margin-bottom:10px;\">Spotify Playlist Tracker</div>
+                <h1 style=\"margin:0;font-size:34px;line-height:1.15;font-weight:700;color:#101828;\">{safe_title}</h1>
+                <p style=\"margin:8px 0 0;font-size:14px;line-height:1.5;color:#475467;\">{safe_subtitle}</p>
             </div>
             <div>{html_body}</div>
         </div>

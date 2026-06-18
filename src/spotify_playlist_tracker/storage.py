@@ -59,7 +59,7 @@ class SnapshotStore:
         target.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
         return target
 
-    def save_summary(self, report: DiffReport, snapshot: PlaylistSnapshot) -> Path:
+    def save_summary(self, report: DiffReport, snapshot: PlaylistSnapshot, hide_reordered: bool = False) -> Path:
         self._results_dir.mkdir(parents=True, exist_ok=True)
         target = self._results_dir / _build_filename(
             report.generated_at,
@@ -68,7 +68,7 @@ class SnapshotStore:
             "summary",
             ".md",
         )
-        target.write_text(report.format_markdown(snapshot), encoding="utf-8")
+        target.write_text(report.format_markdown(snapshot, hide_reordered=hide_reordered), encoding="utf-8")
         return target
 
     def save_unavailable_summary(self, generated_at: str, playlist_name: str, playlist_id: str, payload: dict[str, Any]) -> Path:
