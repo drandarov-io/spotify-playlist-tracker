@@ -15,6 +15,7 @@ The main workflow is the **`check`** command. On every run it:
 3. Compares the current snapshot against the previous one and saves a **diff** JSON when changes are detected.
 4. Creates a **markdown summary** on the initial run or when the diff contains removals, reorders, metadata changes, or newly unavailable tracks. Summaries are skipped when the only changes are added tracks (override with `--force-summary`).
 5. Sends a **webhook** per generated summary when `TRACKER_SUMMARY_WEBHOOK_URL` is configured. The payload includes both markdown and HTML, suitable for email delivery.
+6. If token refresh fails (for example expired/invalid refresh token), sends a **failure webhook** with a warning markdown/html payload when `TRACKER_SUMMARY_WEBHOOK_URL` is configured.
 
 The **`run`** command wraps `check` with a schedule loop — it runs `check` immediately, then repeats according to `TRACKER_SCHEDULE`.
 
@@ -69,6 +70,9 @@ Optional variables:
   Optional webhook endpoint for markdown summaries
 - `TRACKER_WEBHOOK_TIMEOUT_SECONDS`
   Default: `15`
+- `HIDE_REORDERED`
+  Default: `false`
+  When `true`, the summary still reports `Reordered` count in the diff table, but omits the `## Reordered` section body.
 
 Example `.env` values are provided in `.env.example`.
 
@@ -86,6 +90,8 @@ Parameters:
 | `--raw-output` | Print the full diff report as JSON (change fields, reasons, file paths) instead of the default artifact-path log |
 
 Auth behavior: if the auth file already exists, it uses or refreshes it. If it does not exist, it logs the Spotify authorization URL, waits for the callback, saves `.auth`, prints the token JSON to stdout, and continues with the check.
+
+If refresh fails and `TRACKER_SUMMARY_WEBHOOK_URL` is set, `check` sends a warning webhook payload indicating auth refresh failure and exits with status `1`.
 
 ### `run`
 
@@ -225,6 +231,13 @@ When a summary is created and `TRACKER_SUMMARY_WEBHOOK_URL` is set, the applicat
 - rendered HTML summary content in a separate `html` field
 
 This is suitable for n8n workflows that want to send either the markdown or the pre-rendered HTML email body directly.
+
+When auth refresh fails and `TRACKER_SUMMARY_WEBHOOK_URL` is set, the application sends a failure payload with:
+
+- `event_type: failure`
+- warning markdown content
+- rendered warning HTML
+- metadata including error message, auth file path, and playlist IDs
 
 ## GitHub Action
 

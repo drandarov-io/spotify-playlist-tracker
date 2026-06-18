@@ -355,21 +355,25 @@ class DiffReport:
             item = change.after or change.before or {}
             name = _markdown_escape(item.get("name") or "Unknown")
             artists = _markdown_escape(", ".join(item.get("artists", [])) or "Unknown")
-            lines.append(f"- {name} - {artists};")
+            before_position = change.before_position if change.before_position is not None else "-"
+            after_position = change.after_position if change.after_position is not None else "-"
+            position_text = f"positions {before_position} -> {after_position}"
 
-            if change.before_position is not None or change.after_position is not None:
-                before_position = change.before_position if change.before_position is not None else "-"
-                after_position = change.after_position if change.after_position is not None else "-"
-                lines.append(f"  - positions {before_position} -> {after_position}")
-
-            if include_fields and change.changed_fields:
+            if include_fields:
+                lines.append(f"- {name} - {artists};")
+                if change.before_position is not None or change.after_position is not None:
+                    lines.append(f"    - {position_text}")
                 for index, field_change in enumerate(_format_changed_field_values(change)):
                     prefix = "changes: " if index == 0 else ""
-                    lines.append(f"  - {prefix}{field_change}")
-
-            if include_reason:
-                reason = item.get("availability_status") or item.get("restriction_reason") or "unknown"
-                lines.append(f"  - reason: {_markdown_escape(str(reason))}")
+                    lines.append(f"    - {prefix}{field_change}")
+            else:
+                detail_parts = [f"{name} - {artists}"]
+                if change.before_position is not None or change.after_position is not None:
+                    detail_parts.append(position_text)
+                if include_reason:
+                    reason = item.get("availability_status") or item.get("restriction_reason") or "unknown"
+                    detail_parts.append(_markdown_escape(str(reason)))
+                lines.append(f"- {'; '.join(detail_parts)}")
 
         lines.append("")
         return lines

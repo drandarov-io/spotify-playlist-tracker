@@ -72,7 +72,7 @@ def test_format_markdown_shows_exact_changed_values() -> None:
     content = report.format_markdown(current)
 
     assert "positions 254 -> 254" in content
-    assert "  - changes: is_playable: true -> false" in content
+    assert "    - changes: is_playable: true -> false" in content
     assert "is_playable: true -> false" in content
     assert "restriction_reason: none -> market" in content
     assert "availability_status: available -> market" in content
