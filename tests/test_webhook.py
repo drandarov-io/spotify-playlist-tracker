@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 from spotify_playlist_tracker.models import DiffReport
-from spotify_playlist_tracker.webhook import WebhookError, send_failure_webhook, send_summary_webhook
+from spotify_playlist_tracker.webhook import (
+    WebhookError,
+    send_destructive_unavailable_webhook,
+    send_failure_webhook,
+    send_summary_webhook,
+)
 
 
 class DummyResponse:
@@ -128,3 +133,48 @@ def test_send_failure_webhook_posts_markdown(monkeypatch) -> None:
     assert "Authentication failed" in captured["json"]["markdown"]
     assert captured["json"]["html"].startswith("<!DOCTYPE html>")
     assert captured["timeout"] == 7.0
+
+
+def test_send_destructive_unavailable_webhook_posts_alarm_payload(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["timeout"] = timeout
+        return DummyResponse(200)
+
+    monkeypatch.setattr("spotify_playlist_tracker.webhook.httpx.post", fake_post)
+
+    send_destructive_unavailable_webhook(
+        webhook_url="https://example.test/hook",
+        title="Destructive Alert",
+        subtitle="Playlist: 2 affected",
+        markdown="# ALERT\n\nMetadata removed.",
+        timeout_seconds=9.0,
+        metadata={"count": 2},
+    )
+
+    assert captured["url"] == "https://example.test/hook"
+    assert captured["json"]["event_type"] == "destructive_unavailable_alarm"
+    assert "Metadata removed" in captured["json"]["markdown"]
+    assert captured["json"]["html"].startswith("<!DOCTYPE html>")
+    assert captured["json"]["metadata"]["count"] == 2
+    assert captured["timeout"] == 9.0
+
+
+def test_send_destructive_unavailable_webhook_raises_for_failure(monkeypatch) -> None:
+    def fake_post(url, json, timeout):
+        return DummyResponse(502, "bad gateway")
+
+    monkeypatch.setattr("spotify_playlist_tracker.webhook.httpx.post", fake_post)
+
+    with pytest.raises(WebhookError):
+        send_destructive_unavailable_webhook(
+            webhook_url="https://example.test/hook",
+            title="Destructive Alert",
+            subtitle="Playlist: 1 affected",
+            markdown="# ALERT",
+            timeout_seconds=9.0,
+            metadata={"count": 1},
+        )

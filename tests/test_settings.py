@@ -13,6 +13,7 @@ def test_settings_load_from_environment(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TRACKER_AUTH_FILE", ".auth")
     monkeypatch.setenv("TRACKER_SCHEDULE", "daily")
     monkeypatch.setenv("TRACKER_SUMMARY_WEBHOOK_URL", "https://example.test/hook")
+    monkeypatch.setenv("TRACKER_DESTRUCTIVE_UNAVAILABLE_WEBHOOK_URL", "https://example.test/alarm")
     monkeypatch.setenv("TRACKER_WEBHOOK_TIMEOUT_SECONDS", "12")
     monkeypatch.setenv("HIDE_REORDERED", "true")
 
@@ -25,6 +26,7 @@ def test_settings_load_from_environment(monkeypatch, tmp_path) -> None:
     assert settings.paths.token_file == (tmp_path / ".auth").resolve()
     assert settings.runtime.schedule == "daily"
     assert settings.runtime.summary_webhook_url == "https://example.test/hook"
+    assert settings.runtime.destructive_unavailable_webhook_url == "https://example.test/alarm"
     assert settings.runtime.webhook_timeout_seconds == 12.0
     assert settings.runtime.hide_reordered_section is True
 

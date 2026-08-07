@@ -201,6 +201,14 @@ class DiffReport:
         return any((self.added, self.removed, self.reordered, self.changed, self.unavailable))
 
     @property
+    def destructive_unavailable(self) -> tuple[DiffChange, ...]:
+        return tuple(
+            change
+            for change in self.unavailable
+            if _is_destructive_unavailable_change(change)
+        )
+
+    @property
     def should_create_summary(self) -> bool:
         return self.should_create_summary_for(False)
 
@@ -274,6 +282,9 @@ class DiffReport:
         else:
             lines.append("- Previous snapshot: none")
 
+        if self.unavailable:
+            lines.extend(self._format_markdown_change_section("Newly Unavailable", self.unavailable, include_reason=True))
+
         lines.extend(
             [
                 "",
@@ -310,7 +321,6 @@ class DiffReport:
             if not hide_reordered:
                 lines.extend(self._format_markdown_change_section("Reordered", self.reordered))
             lines.extend(self._format_markdown_change_section("Changed", self.changed, include_fields=True))
-            lines.extend(self._format_markdown_change_section("Newly Unavailable", self.unavailable, include_reason=True))
 
         unavailable_entries = [entry for entry in snapshot.entries if not entry.is_available]
         lines.extend(
@@ -353,6 +363,8 @@ class DiffReport:
 
         for change in changes:
             item = change.after or change.before or {}
+            if include_reason and _is_track_identity_missing(change.after) and change.before:
+                item = change.before
             name = _markdown_escape(item.get("name") or "Unknown")
             artists = _markdown_escape(", ".join(item.get("artists", [])) or "Unknown")
             before_position = change.before_position if change.before_position is not None else "-"
@@ -371,7 +383,8 @@ class DiffReport:
                 if change.before_position is not None or change.after_position is not None:
                     detail_parts.append(position_text)
                 if include_reason:
-                    reason = item.get("availability_status") or item.get("restriction_reason") or "unknown"
+                    reason_source = change.after or item
+                    reason = reason_source.get("availability_status") or reason_source.get("restriction_reason") or "unknown"
                     detail_parts.append(_markdown_escape(str(reason)))
                 lines.append(f"- {'; '.join(detail_parts)}")
 
@@ -406,6 +419,29 @@ def _format_change_value(value: Any) -> str:
     if value == "":
         return "empty"
     return str(value)
+
+
+def _is_track_identity_missing(item: dict[str, Any] | None) -> bool:
+    if item is None:
+        return True
+    name = str(item.get("name") or "").strip()
+    artists = item.get("artists")
+    has_artists = isinstance(artists, list) and any(str(artist).strip() for artist in artists)
+    return not name and not has_artists
+
+
+def _is_destructive_unavailable_change(change: DiffChange) -> bool:
+    before = change.before
+    after = change.after
+    if before is None or after is None:
+        return False
+    if before.get("availability_status") == "available" and after.get("availability_status") == "available":
+        return False
+    if not _is_track_identity_missing(after):
+        return False
+    if _is_track_identity_missing(before):
+        return False
+    return True
 
 
 def _availability_explanation(reason: str, market: str, linked_from_id: str | None, is_playable: bool | None) -> str:

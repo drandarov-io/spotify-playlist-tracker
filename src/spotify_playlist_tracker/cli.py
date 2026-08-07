@@ -13,7 +13,7 @@ from .settings import AppSettings, SettingsError
 from .scheduler import ScheduleError, next_run_after
 from .spotify_api import SpotifyApiError, SpotifyClient
 from .storage import SnapshotStore
-from .webhook import WebhookError, send_failure_webhook, send_summary_webhook
+from .webhook import WebhookError, send_destructive_unavailable_webhook, send_failure_webhook, send_summary_webhook
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,6 +116,41 @@ def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bo
                             summary_path=summary_path,
                             timeout_seconds=settings.runtime.webhook_timeout_seconds,
                         )
+
+                destructive_changes = report.destructive_unavailable
+                destructive_webhook_url = (
+                    settings.runtime.destructive_unavailable_webhook_url
+                    or settings.runtime.summary_webhook_url
+                )
+                if destructive_changes and destructive_webhook_url:
+                    send_destructive_unavailable_webhook(
+                        webhook_url=destructive_webhook_url,
+                        title="Spotify Playlist Destructive Unavailability Alert",
+                        subtitle=(
+                            f"{report.playlist_name}: {len(destructive_changes)} track(s) lost metadata"
+                        ),
+                        markdown=_build_destructive_unavailable_markdown(report, destructive_changes),
+                        timeout_seconds=settings.runtime.webhook_timeout_seconds,
+                        metadata={
+                            "playlist_id": report.playlist_id,
+                            "playlist_name": report.playlist_name,
+                            "market": report.market,
+                            "generated_at": report.generated_at,
+                            "current_snapshot_at": report.current_snapshot_at,
+                            "previous_snapshot_at": report.previous_snapshot_at,
+                            "destructive_unavailable_count": len(destructive_changes),
+                            "tracks": [
+                                {
+                                    "key": change.key,
+                                    "before": change.before,
+                                    "after": change.after,
+                                    "before_position": change.before_position,
+                                    "after_position": change.after_position,
+                                }
+                                for change in destructive_changes
+                            ],
+                        },
+                    )
 
                 if raw_output:
                     print(
@@ -250,6 +285,48 @@ def _build_raw_check_output(
         "summary": None if summary_path is None else {"name": summary_path.name, "path": str(summary_path)},
     }
     return payload
+
+
+def _build_destructive_unavailable_markdown(report, changes) -> str:
+    lines = [
+        "# ALERT: Destructive Playlist Unavailability Detected",
+        "",
+        "Spotify returned one or more tracks in an unavailable state with track identity metadata removed.",
+        "This is typically irreversible from Spotify payloads alone and should be treated as high priority.",
+        "",
+        "## Playlist",
+        "",
+        f"- Name: `{report.playlist_name}`",
+        f"- Playlist ID: `{report.playlist_id}`",
+        f"- Market: `{report.market}`",
+        f"- Current snapshot: `{report.current_snapshot_at}`",
+        f"- Previous snapshot: `{report.previous_snapshot_at or 'none'}`",
+        f"- Affected tracks: `{len(changes)}`",
+        "",
+        "## Affected Tracks (before metadata was deleted)",
+        "",
+    ]
+
+    for change in changes:
+        before = change.before or {}
+        after = change.after or {}
+        name = before.get("name") or "Unknown"
+        artists = ", ".join(before.get("artists", [])) or "Unknown"
+        album = before.get("album") or "Unknown"
+        spotify_id = before.get("spotify_id") or "Unknown"
+        status = after.get("availability_status") or after.get("restriction_reason") or "unknown"
+        lines.append(
+            "- "
+            f"{name} - {artists}; "
+            f"album: {album}; "
+            f"spotify_id: {spotify_id}; "
+            f"positions {change.before_position if change.before_position is not None else '-'} -> "
+            f"{change.after_position if change.after_position is not None else '-'}; "
+            f"status: {status}"
+        )
+
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _build_unavailable_summary_output(

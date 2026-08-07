@@ -68,6 +68,8 @@ Optional variables:
   Also supports a standard 5-field cron expression in UTC
 - `TRACKER_SUMMARY_WEBHOOK_URL`
   Optional webhook endpoint for markdown summaries
+- `TRACKER_DESTRUCTIVE_UNAVAILABLE_WEBHOOK_URL`
+  Optional webhook endpoint for destructive unavailable alarms (tracks that become unavailable and lose identity metadata such as name/artists). If omitted, alarms are sent to `TRACKER_SUMMARY_WEBHOOK_URL`.
 - `TRACKER_WEBHOOK_TIMEOUT_SECONDS`
   Default: `15`
 - `HIDE_REORDERED`
@@ -238,6 +240,12 @@ When auth refresh fails and `TRACKER_SUMMARY_WEBHOOK_URL` is set, the applicatio
 - warning markdown content
 - rendered warning HTML
 - metadata including error message, auth file path, and playlist IDs
+
+When a run detects newly unavailable tracks that lost identity metadata (for example name and artists blanked by Spotify), the application sends an additional alarm payload with:
+
+- `event_type: destructive_unavailable_alarm`
+- high-priority markdown/html alert content
+- metadata including affected tracks with pre-change metadata and positions
 
 ## GitHub Action
 

@@ -82,6 +82,35 @@ def send_failure_webhook(
         raise WebhookError(f"Failure webhook returned HTTP {response.status_code}: {response.text}")
 
 
+def send_destructive_unavailable_webhook(
+    *,
+    webhook_url: str,
+    title: str,
+    subtitle: str,
+    markdown: str,
+    timeout_seconds: float,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    html_body = render_markdown(markdown, extensions=["tables", "sane_lists"])
+    html = _build_generic_email_html(title=title, subtitle=subtitle, html_body=html_body)
+    payload = {
+        "event_type": "destructive_unavailable_alarm",
+        "title": title,
+        "subtitle": subtitle,
+        "markdown": markdown,
+        "html": html,
+        "metadata": metadata or {},
+    }
+
+    try:
+        response = httpx.post(webhook_url, json=payload, timeout=timeout_seconds)
+    except httpx.HTTPError as error:
+        raise WebhookError(f"Destructive unavailable webhook request failed: {error}") from error
+
+    if response.status_code >= 400:
+        raise WebhookError(f"Destructive unavailable webhook returned HTTP {response.status_code}: {response.text}")
+
+
 def _build_email_html(report: DiffReport, html_body: str) -> str:
     html_body = _enhance_email_html(_remove_duplicate_title(html_body))
     title = escape(f"Playlist Summary: {report.playlist_name}")

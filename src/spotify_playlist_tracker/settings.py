@@ -38,6 +38,7 @@ class RuntimeConfig:
     webhook_timeout_seconds: float
     auth_bind_host: str | None
     hide_reordered_section: bool = False
+    destructive_unavailable_webhook_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,7 @@ class AppSettings:
             webhook_timeout_seconds=_parse_positive_float("TRACKER_WEBHOOK_TIMEOUT_SECONDS", 15.0),
             auth_bind_host=_empty_to_none(os.getenv("TRACKER_AUTH_BIND_HOST")),
             hide_reordered_section=_parse_bool(os.getenv("HIDE_REORDERED"), False),
+            destructive_unavailable_webhook_url=_validate_optional_url("TRACKER_DESTRUCTIVE_UNAVAILABLE_WEBHOOK_URL"),
         )
 
         paths = PathConfig(

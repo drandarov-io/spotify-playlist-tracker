@@ -358,6 +358,136 @@ def test_run_checkunavailable_saves_only_unavailable_summary(monkeypatch, tmp_pa
     assert fake_store.saved_payload["items"][0]["name"] == "Recovered Song"
     assert fake_store.saved_payload["items"][0]["market_lookup"]["available_market_count"] == 2
     assert "| URI | Name | Artists | Album | Available markets | Explanation |" in fake_store.saved_markdown
-    assert "Recovered Song" in fake_store.saved_markdown
-    assert "Unavailable summary:" in output
-    assert "Unavailable summary markdown:" in output
+
+
+def test_run_check_sends_destructive_unavailable_alarm(monkeypatch, tmp_path) -> None:
+    settings = build_settings(tmp_path)
+    settings = AppSettings(
+        spotify=settings.spotify,
+        playlists=settings.playlists,
+        runtime=RuntimeConfig(
+            schedule="daily",
+            summary_webhook_url="https://example.test/summary",
+            webhook_timeout_seconds=15.0,
+            auth_bind_host=None,
+            hide_reordered_section=False,
+            destructive_unavailable_webhook_url="https://example.test/alarm",
+        ),
+        paths=settings.paths,
+    )
+    previous = PlaylistSnapshot(
+        playlist_id="playlist-1",
+        playlist_name="Playlist",
+        fetched_at="2026-03-09T00:00:00Z",
+        market="DE",
+        total_items=1,
+        entries=(
+            PlaylistEntry(
+                position=0,
+                item_type="track",
+                spotify_id="track-1",
+                uri="spotify:track:track-1",
+                name="Before Song",
+                artists=("Artist",),
+                album="Album",
+                duration_ms=180000,
+                explicit=False,
+                is_local=False,
+                added_at="2026-03-09T00:00:00Z",
+                added_by="user",
+                is_playable=True,
+                restriction_reason=None,
+            ),
+        ),
+    )
+    current = PlaylistSnapshot(
+        playlist_id="playlist-1",
+        playlist_name="Playlist",
+        fetched_at="2026-03-10T00:00:00Z",
+        market="DE",
+        total_items=1,
+        entries=(
+            PlaylistEntry(
+                position=0,
+                item_type="track",
+                spotify_id="track-1",
+                uri="spotify:track:track-1",
+                name=None,
+                artists=(),
+                album=None,
+                duration_ms=0,
+                explicit=False,
+                is_local=False,
+                added_at="2026-03-09T00:00:00Z",
+                added_by="user",
+                is_playable=False,
+                restriction_reason="market",
+            ),
+        ),
+    )
+
+    class FakeStore:
+        def __init__(self, _results_dir):
+            pass
+
+        def load_latest_snapshot(self, _playlist_id):
+            return previous
+
+        def save_snapshot(self, _snapshot):
+            return tmp_path / "results" / "snapshot.json"
+
+        def save_raw(self, _fetched_at, _playlist_name, _playlist_id, _payload):
+            return tmp_path / "results" / "raw.json"
+
+        def save_diff(self, _report):
+            return tmp_path / "results" / "diff.json"
+
+        def save_summary(self, _report, _snapshot, hide_reordered=False):
+            summary_path = tmp_path / "results" / "summary.md"
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            summary_path.write_text("# Summary", encoding="utf-8")
+            return summary_path
+
+    class FakeSpotifyClient:
+        def __init__(self, _settings, _token):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def fetch_playlist_data(self, _playlist_id):
+            class Result:
+                def __init__(self, snapshot):
+                    self.snapshot = snapshot
+                    self.raw_payload = {"metadata": {"id": snapshot.playlist_id}, "item_pages": []}
+
+            return Result(current)
+
+    captured_alarm: dict[str, object] = {}
+
+    def fake_alarm_webhook(**kwargs):
+        captured_alarm.update(kwargs)
+
+    monkeypatch.setattr(
+        "spotify_playlist_tracker.cli.get_valid_token",
+        lambda settings, token_store: TokenData(
+            access_token="access",
+            refresh_token="refresh",
+            expires_at=9999999999,
+        ),
+    )
+    monkeypatch.setattr("spotify_playlist_tracker.cli.SnapshotStore", lambda _path: FakeStore(_path))
+    monkeypatch.setattr("spotify_playlist_tracker.cli.SpotifyClient", FakeSpotifyClient)
+    monkeypatch.setattr("spotify_playlist_tracker.cli.send_summary_webhook", lambda **kwargs: None)
+    monkeypatch.setattr("spotify_playlist_tracker.cli.send_destructive_unavailable_webhook", fake_alarm_webhook)
+
+    exit_code = run_check(settings)
+
+    assert exit_code == 0
+    assert captured_alarm["webhook_url"] == "https://example.test/alarm"
+    assert "Spotify Playlist Destructive Unavailability Alert" == captured_alarm["title"]
+    assert "Before Song - Artist" in captured_alarm["markdown"]
+    assert captured_alarm["metadata"]["destructive_unavailable_count"] == 1

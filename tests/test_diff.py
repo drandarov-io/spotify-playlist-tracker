@@ -89,6 +89,58 @@ def test_format_markdown_hides_reordered_section_when_requested() -> None:
     assert "## Reordered" not in content
 
 
+def test_format_markdown_places_newly_unavailable_before_diff_summary() -> None:
+    previous = make_snapshot(make_entry(0, "a", playable=True))
+    current = make_snapshot(
+        make_entry(0, "a", playable=False, restriction="market"),
+        fetched_at="2026-03-10T00:00:00Z",
+    )
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current)
+
+    assert "## Newly Unavailable" in content
+    assert content.index("## Newly Unavailable") < content.index("## Diff Summary")
+
+
+def test_format_markdown_newly_unavailable_uses_previous_track_identity_when_current_is_blank() -> None:
+    previous = make_snapshot(make_entry(0, "a", name="Before Song"))
+    current = make_snapshot(
+        PlaylistEntry(
+            position=0,
+            item_type="track",
+            spotify_id="a",
+            uri="spotify:track:a",
+            name=None,
+            artists=(),
+            album=None,
+            duration_ms=0,
+            explicit=False,
+            is_local=False,
+            added_at="2026-03-09T00:00:00Z",
+            added_by="user",
+            is_playable=False,
+            restriction_reason="market",
+        ),
+        fetched_at="2026-03-10T00:00:00Z",
+    )
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current)
+
+    assert "- Before Song - Artist; positions 0 -> 0; market" in content
+
+
+def test_format_markdown_omits_newly_unavailable_section_when_empty() -> None:
+    previous = make_snapshot(make_entry(0, "a"))
+    current = make_snapshot(make_entry(0, "a"), fetched_at="2026-03-10T00:00:00Z")
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current)
+
+    assert "## Newly Unavailable" not in content
+
+
 def test_format_markdown_shows_exact_artist_list_change() -> None:
     previous = make_snapshot(make_entry(141, "a", name="Song"))
     current_entry = PlaylistEntry(

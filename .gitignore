@@ -9,3 +9,4 @@ results/
 *.egg-info/
 playground/**
 !.gitkeep
+.vscode
