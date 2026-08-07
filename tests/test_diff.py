@@ -128,7 +128,21 @@ def test_format_markdown_newly_unavailable_uses_previous_track_identity_when_cur
     report = compare_snapshots(previous, current)
     content = report.format_markdown(current)
 
+    assert "- Before Song - Artist; positions 0 -> 0; market (metadata removed by Spotify)" in content
+
+
+def test_format_markdown_newly_unavailable_non_destructive_keeps_plain_reason() -> None:
+    previous = make_snapshot(make_entry(0, "a", name="Before Song", playable=True))
+    current = make_snapshot(
+        make_entry(0, "a", name="Before Song", playable=False, restriction="market"),
+        fetched_at="2026-03-10T00:00:00Z",
+    )
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current)
+
     assert "- Before Song - Artist; positions 0 -> 0; market" in content
+    assert "metadata removed by Spotify" not in content
 
 
 def test_format_markdown_omits_newly_unavailable_section_when_empty() -> None:

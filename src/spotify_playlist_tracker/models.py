@@ -385,7 +385,10 @@ class DiffReport:
                 if include_reason:
                     reason_source = change.after or item
                     reason = reason_source.get("availability_status") or reason_source.get("restriction_reason") or "unknown"
-                    detail_parts.append(_markdown_escape(str(reason)))
+                    reason_text = str(reason)
+                    if _is_destructive_unavailable_change(change):
+                        reason_text = f"{reason_text} (metadata removed by Spotify)"
+                    detail_parts.append(_markdown_escape(reason_text))
                 lines.append(f"- {'; '.join(detail_parts)}")
 
         lines.append("")
