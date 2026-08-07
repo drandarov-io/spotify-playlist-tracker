@@ -488,6 +488,7 @@ def test_run_check_sends_destructive_unavailable_alarm(monkeypatch, tmp_path) ->
 
     assert exit_code == 0
     assert captured_alarm["webhook_url"] == "https://example.test/alarm"
-    assert "Spotify Playlist Destructive Unavailability Alert" == captured_alarm["title"]
+    assert "Alert in Playlist" == captured_alarm["title"]
+    assert "Playlist" == captured_alarm["playlist_name"]
     assert "Before Song - Artist" in captured_alarm["markdown"]
     assert captured_alarm["metadata"]["destructive_unavailable_count"] == 1

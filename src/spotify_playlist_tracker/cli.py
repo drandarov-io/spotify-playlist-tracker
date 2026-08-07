@@ -125,10 +125,16 @@ def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bo
                 if destructive_changes and destructive_webhook_url:
                     send_destructive_unavailable_webhook(
                         webhook_url=destructive_webhook_url,
-                        title="Spotify Playlist Destructive Unavailability Alert",
+                        title=f"Alert in {report.playlist_name}",
                         subtitle=(
-                            f"{report.playlist_name}: {len(destructive_changes)} track(s) lost metadata"
+                            f"{len(destructive_changes)} track(s) lost metadata"
                         ),
+                        playlist_id=report.playlist_id,
+                        playlist_name=report.playlist_name,
+                        generated_at=report.generated_at,
+                        current_snapshot_at=report.current_snapshot_at,
+                        previous_snapshot_at=report.previous_snapshot_at,
+                        market=report.market,
                         markdown=_build_destructive_unavailable_markdown(report, destructive_changes),
                         timeout_seconds=settings.runtime.webhook_timeout_seconds,
                         metadata={

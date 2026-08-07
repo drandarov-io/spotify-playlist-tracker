@@ -150,6 +150,12 @@ def test_send_destructive_unavailable_webhook_posts_alarm_payload(monkeypatch) -
         webhook_url="https://example.test/hook",
         title="Destructive Alert",
         subtitle="Playlist: 2 affected",
+        playlist_id="playlist-1",
+        playlist_name="Playlist",
+        generated_at="2026-03-10T00:00:00Z",
+        current_snapshot_at="2026-03-10T00:00:00Z",
+        previous_snapshot_at="2026-03-09T00:00:00Z",
+        market="DE",
         markdown="# ALERT\n\nMetadata removed.",
         timeout_seconds=9.0,
         metadata={"count": 2},
@@ -157,6 +163,8 @@ def test_send_destructive_unavailable_webhook_posts_alarm_payload(monkeypatch) -
 
     assert captured["url"] == "https://example.test/hook"
     assert captured["json"]["event_type"] == "destructive_unavailable_alarm"
+    assert captured["json"]["playlist_name"] == "Playlist"
+    assert captured["json"]["playlist_id"] == "playlist-1"
     assert "Metadata removed" in captured["json"]["markdown"]
     assert captured["json"]["html"].startswith("<!DOCTYPE html>")
     assert captured["json"]["metadata"]["count"] == 2
@@ -174,6 +182,8 @@ def test_send_destructive_unavailable_webhook_raises_for_failure(monkeypatch) ->
             webhook_url="https://example.test/hook",
             title="Destructive Alert",
             subtitle="Playlist: 1 affected",
+            playlist_id="playlist-1",
+            playlist_name="Playlist",
             markdown="# ALERT",
             timeout_seconds=9.0,
             metadata={"count": 1},
