@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .models import DiffReport, PlaylistSnapshot
+from .models import DiffReport, LostTracks, PlaylistSnapshot
 
 
 class SnapshotStore:
@@ -59,7 +59,13 @@ class SnapshotStore:
         target.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
         return target
 
-    def save_summary(self, report: DiffReport, snapshot: PlaylistSnapshot, hide_reordered: bool = False) -> Path:
+    def save_summary(
+        self,
+        report: DiffReport,
+        snapshot: PlaylistSnapshot,
+        hide_reordered: bool = False,
+        lost_tracks: LostTracks | None = None,
+    ) -> Path:
         self._results_dir.mkdir(parents=True, exist_ok=True)
         target = self._results_dir / _build_filename(
             report.generated_at,
@@ -68,7 +74,10 @@ class SnapshotStore:
             "summary",
             ".md",
         )
-        target.write_text(report.format_markdown(snapshot, hide_reordered=hide_reordered), encoding="utf-8")
+        target.write_text(
+            report.format_markdown(snapshot, hide_reordered=hide_reordered, lost_tracks=lost_tracks),
+            encoding="utf-8",
+        )
         return target
 
     def save_unavailable_summary(self, generated_at: str, playlist_name: str, playlist_id: str, payload: dict[str, Any]) -> Path:
@@ -94,6 +103,40 @@ class SnapshotStore:
         )
         target.write_text(content, encoding="utf-8")
         return target
+
+
+class LostMetadataStore:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def load(self) -> dict[str, dict[str, Any]]:
+        if not self._path.exists():
+            return {}
+        return json.loads(self._path.read_text(encoding="utf-8"))
+
+    def record(self, report: DiffReport) -> dict[str, dict[str, Any]]:
+        tracks = self.load()
+        changes = report.destructive_unavailable
+        for change in changes:
+            before = change.before or {}
+            track = tracks.setdefault(
+                before["spotify_id"],
+                {
+                    "name": before["name"],
+                    "artists": before["artists"],
+                    "album": before["album"],
+                    "uri": before["uri"],
+                    "last_seen_at": report.previous_snapshot_at,
+                    "lost_at": report.current_snapshot_at,
+                    "playlists": {},
+                },
+            )
+            track["playlists"][report.playlist_id] = report.playlist_name
+
+        if changes:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(tracks, indent=2, ensure_ascii=False), encoding="utf-8")
+        return tracks
 
 
 def _safe_timestamp(value: str) -> str:

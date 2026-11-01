@@ -25,6 +25,7 @@ def build_settings(tmp_path):
             root_dir=tmp_path,
             results_dir=tmp_path / "results",
             token_file=tmp_path / "state" / ".auth",
+            lost_metadata_file=tmp_path / "state" / "lost_metadata.json",
         ),
     )
 

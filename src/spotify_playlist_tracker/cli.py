@@ -8,11 +8,11 @@ from pathlib import Path
 
 from .auth import AuthError, TokenStore, authorize, get_valid_token
 from .diff import compare_snapshots
-from .models import PlaylistEntry
+from .models import LostTracks, PlaylistEntry, unknown_label
 from .settings import AppSettings, SettingsError
 from .scheduler import ScheduleError, next_run_after
 from .spotify_api import SpotifyApiError, SpotifyClient
-from .storage import SnapshotStore
+from .storage import LostMetadataStore, SnapshotStore
 from .webhook import WebhookError, send_destructive_unavailable_webhook, send_failure_webhook, send_summary_webhook
 
 
@@ -78,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bool = False) -> int:
     token_store = TokenStore(settings.paths.token_file)
     snapshot_store = SnapshotStore(settings.paths.results_dir)
+    lost_metadata_store = LostMetadataStore(settings.paths.lost_metadata_file)
 
     try:
         token = get_valid_token(settings, token_store)
@@ -94,6 +95,7 @@ def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bo
                 fetched = client.fetch_playlist_data(playlist_id)
                 current = fetched.snapshot
                 report = compare_snapshots(previous, current)
+                lost_tracks = lost_metadata_store.record(report)
                 snapshot_path = snapshot_store.save_snapshot(current)
                 raw_path = snapshot_store.save_raw(current.fetched_at, current.playlist_name, current.playlist_id, fetched.raw_payload)
                 diff_path = snapshot_store.save_diff(report) if report.has_changes else None
@@ -104,6 +106,7 @@ def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bo
                         report,
                         current,
                         hide_reordered=settings.runtime.hide_reordered_section,
+                        lost_tracks=lost_tracks,
                     )
                     if settings.runtime.summary_webhook_url:
                         markdown = summary_path.read_text(encoding="utf-8")
@@ -244,6 +247,7 @@ def run_check_unavailable(settings: AppSettings) -> int:
     token_store = TokenStore(settings.paths.token_file)
     token = get_valid_token(settings, token_store)
     snapshot_store = SnapshotStore(settings.paths.results_dir)
+    lost_tracks = LostMetadataStore(settings.paths.lost_metadata_file).load()
 
     had_errors = False
     with SpotifyClient(settings, token.access_token) as client:
@@ -253,7 +257,7 @@ def run_check_unavailable(settings: AppSettings) -> int:
                 unavailable_entries = [entry for entry in current.entries if not entry.is_available]
                 lookup_ids = [entry.spotify_id for entry in unavailable_entries if entry.spotify_id and entry.item_type == "track"]
                 track_metadata = client.fetch_tracks_metadata(lookup_ids)
-                payload = _build_unavailable_summary_output(current, unavailable_entries, track_metadata)
+                payload = _build_unavailable_summary_output(current, unavailable_entries, track_metadata, lost_tracks)
                 unavailable_summary_path = snapshot_store.save_unavailable_summary(
                     current.fetched_at,
                     current.playlist_name,
@@ -339,9 +343,10 @@ def _build_unavailable_summary_output(
     snapshot,
     unavailable_entries: list[PlaylistEntry],
     track_metadata: dict[str, dict[str, object]],
+    lost_tracks: LostTracks,
 ) -> dict[str, object]:
     entries = [
-        _build_unavailable_entry_payload(entry, snapshot.market, track_metadata.get(entry.spotify_id or ""))
+        _build_unavailable_entry_payload(entry, snapshot.market, track_metadata.get(entry.spotify_id or ""), lost_tracks)
         for entry in unavailable_entries
     ]
     return {
@@ -359,13 +364,15 @@ def _build_unavailable_entry_payload(
     entry: PlaylistEntry,
     market: str,
     lookup_track: dict[str, object] | None,
+    lost_tracks: LostTracks,
 ) -> dict[str, object]:
     lookup_available_markets = None if lookup_track is None else lookup_track.get("available_markets")
     available_markets = None
     if isinstance(lookup_available_markets, list):
         available_markets = [str(item) for item in lookup_available_markets]
 
-    display_name = entry.name or (None if lookup_track is None else lookup_track.get("name")) or "Unknown"
+    former = lost_tracks.get(entry.spotify_id or "", {})
+    display_name = entry.name or (None if lookup_track is None else lookup_track.get("name")) or unknown_label(former.get("name"))
     lookup_artists = []
     if lookup_track is not None:
         raw_artists = lookup_track.get("artists")
@@ -375,7 +382,7 @@ def _build_unavailable_entry_payload(
                 for artist in raw_artists
                 if isinstance(artist, dict) and artist.get("name")
             ]
-    display_artists = list(entry.artists) or lookup_artists or ["Unknown"]
+    display_artists = list(entry.artists) or lookup_artists or [unknown_label(", ".join(former.get("artists", [])))]
     configured_market_available = None if available_markets is None else market in available_markets
 
     return {

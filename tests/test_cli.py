@@ -2,10 +2,11 @@ import json
 
 import pytest
 
-from spotify_playlist_tracker.cli import build_parser, run_check
+from spotify_playlist_tracker.cli import _build_unavailable_entry_payload, build_parser, run_check
 from spotify_playlist_tracker.auth import AuthError
 from spotify_playlist_tracker.models import DiffReport, PlaylistEntry, PlaylistSnapshot, TokenData
 from spotify_playlist_tracker.settings import AppSettings, PathConfig, PlaylistConfig, RuntimeConfig, SpotifyCredentials
+from spotify_playlist_tracker.storage import SnapshotStore
 
 
 def build_settings(tmp_path) -> AppSettings:
@@ -30,6 +31,7 @@ def build_settings(tmp_path) -> AppSettings:
             root_dir=tmp_path,
             results_dir=tmp_path / "results",
             token_file=tmp_path / "state" / ".auth",
+            lost_metadata_file=tmp_path / "state" / "lost_metadata.json",
         ),
     )
 
@@ -442,7 +444,7 @@ def test_run_check_sends_destructive_unavailable_alarm(monkeypatch, tmp_path) ->
         def save_diff(self, _report):
             return tmp_path / "results" / "diff.json"
 
-        def save_summary(self, _report, _snapshot, hide_reordered=False):
+        def save_summary(self, _report, _snapshot, hide_reordered=False, lost_tracks=None):
             summary_path = tmp_path / "results" / "summary.md"
             summary_path.parent.mkdir(parents=True, exist_ok=True)
             summary_path.write_text("# Summary", encoding="utf-8")
@@ -492,3 +494,115 @@ def test_run_check_sends_destructive_unavailable_alarm(monkeypatch, tmp_path) ->
     assert "Playlist" == captured_alarm["playlist_name"]
     assert "Before Song - Artist" in captured_alarm["markdown"]
     assert captured_alarm["metadata"]["destructive_unavailable_count"] == 1
+
+
+def test_run_check_records_lost_metadata_and_labels_summary(monkeypatch, tmp_path) -> None:
+    settings = build_settings(tmp_path)
+    previous = PlaylistSnapshot(
+        playlist_id="playlist-1",
+        playlist_name="Playlist",
+        fetched_at="2026-03-09T00:00:00Z",
+        market="DE",
+        total_items=1,
+        entries=(
+            PlaylistEntry(
+                position=0,
+                item_type="track",
+                spotify_id="track-1",
+                uri="spotify:track:track-1",
+                name="Before Song",
+                artists=("Artist",),
+                album="Album",
+                is_playable=True,
+            ),
+        ),
+    )
+    current = PlaylistSnapshot(
+        playlist_id="playlist-1",
+        playlist_name="Playlist",
+        fetched_at="2026-03-10T00:00:00Z",
+        market="DE",
+        total_items=1,
+        entries=(
+            PlaylistEntry(
+                position=0,
+                item_type="track",
+                spotify_id="track-1",
+                uri="spotify:track:track-1",
+                name=None,
+                artists=(),
+                album=None,
+                is_playable=False,
+                restriction_reason="market",
+            ),
+        ),
+    )
+    SnapshotStore(settings.paths.results_dir).save_snapshot(previous)
+
+    class FakeSpotifyClient:
+        def __init__(self, _settings, _token):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def fetch_playlist_data(self, _playlist_id):
+            class Result:
+                def __init__(self, snapshot):
+                    self.snapshot = snapshot
+                    self.raw_payload = {"metadata": {"id": snapshot.playlist_id}, "item_pages": []}
+
+            return Result(current)
+
+    monkeypatch.setattr(
+        "spotify_playlist_tracker.cli.get_valid_token",
+        lambda settings, token_store: TokenData(
+            access_token="access",
+            refresh_token="refresh",
+            expires_at=9999999999,
+        ),
+    )
+    monkeypatch.setattr("spotify_playlist_tracker.cli.SpotifyClient", FakeSpotifyClient)
+
+    exit_code = run_check(settings)
+    registry = json.loads(settings.paths.lost_metadata_file.read_text(encoding="utf-8"))
+    summary = next((tmp_path / "results").glob("*_summary.md")).read_text(encoding="utf-8")
+
+    assert exit_code == 0
+    assert registry == {
+        "track-1": {
+            "name": "Before Song",
+            "artists": ["Artist"],
+            "album": "Album",
+            "uri": "spotify:track:track-1",
+            "last_seen_at": "2026-03-09T00:00:00Z",
+            "lost_at": "2026-03-10T00:00:00Z",
+            "playlists": {"playlist-1": "Playlist"},
+        }
+    }
+    assert "| Unknown (Before Song) | Unknown (Artist) | market |" in summary
+
+
+def test_unavailable_entry_payload_labels_blank_track_with_former_identity() -> None:
+    entry = PlaylistEntry(
+        position=0,
+        item_type="track",
+        spotify_id="track-1",
+        uri="spotify:track:track-1",
+        name=None,
+        artists=(),
+        is_playable=False,
+        restriction_reason="market",
+    )
+    lost_tracks = {"track-1": {"name": "Former Song", "artists": ["Former Artist", "Guest"]}}
+
+    labeled = _build_unavailable_entry_payload(entry, "DE", None, lost_tracks)
+    unlabeled = _build_unavailable_entry_payload(entry, "DE", None, {})
+
+    assert labeled["name"] == "Unknown (Former Song)"
+    assert labeled["artists"] == ["Unknown (Former Artist, Guest)"]
+    assert unlabeled["name"] == "Unknown"
+    assert unlabeled["artists"] == ["Unknown"]

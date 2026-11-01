@@ -33,6 +33,20 @@ def make_snapshot(*entries: PlaylistEntry, fetched_at: str = "2026-03-09T00:00:0
     )
 
 
+def make_blank_entry(position: int, spotify_id: str) -> PlaylistEntry:
+    return PlaylistEntry(
+        position=position,
+        item_type="track",
+        spotify_id=spotify_id,
+        uri=f"spotify:track:{spotify_id}",
+        name=None,
+        artists=(),
+        album=None,
+        is_playable=False,
+        restriction_reason="market",
+    )
+
+
 def test_compare_snapshots_detects_add_remove_and_reorder() -> None:
     previous = make_snapshot(make_entry(0, "a", name="Alpha"), make_entry(1, "b"))
     current = make_snapshot(make_entry(0, "b"), make_entry(1, "c", name="Gamma"), fetched_at="2026-03-10T00:00:00Z")
@@ -153,6 +167,39 @@ def test_format_markdown_omits_newly_unavailable_section_when_empty() -> None:
     content = report.format_markdown(current)
 
     assert "## Newly Unavailable" not in content
+
+
+def test_format_markdown_labels_blank_unavailable_track_with_former_identity() -> None:
+    previous = make_snapshot(make_entry(0, "a", name="Before Song"))
+    current = make_snapshot(make_blank_entry(0, "a"), fetched_at="2026-03-10T00:00:00Z")
+    lost_tracks = {"a": {"name": "Before Song", "artists": ["Artist"]}}
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current, lost_tracks=lost_tracks)
+
+    assert "| Unknown (Before Song) | Unknown (Artist) | market |" in content
+
+
+def test_format_markdown_keeps_plain_unknown_for_blank_track_without_former_identity() -> None:
+    previous = make_snapshot(make_blank_entry(0, "a"))
+    current = make_snapshot(make_blank_entry(0, "a"), fetched_at="2026-03-10T00:00:00Z")
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current)
+
+    assert "| Unknown | Unknown | market |" in content
+    assert "Unknown (" not in content
+
+
+def test_format_markdown_labels_removed_blank_track_with_former_identity() -> None:
+    previous = make_snapshot(make_blank_entry(0, "a"), make_entry(1, "b"))
+    current = make_snapshot(make_entry(0, "b"), fetched_at="2026-03-10T00:00:00Z")
+    lost_tracks = {"a": {"name": "Before Song", "artists": ["Artist"]}}
+
+    report = compare_snapshots(previous, current)
+    content = report.format_markdown(current, lost_tracks=lost_tracks)
+
+    assert "- Unknown (Before Song) - Unknown (Artist); positions 0 -> -" in content
 
 
 def test_format_markdown_shows_exact_artist_list_change() -> None:

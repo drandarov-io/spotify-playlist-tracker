@@ -61,6 +61,28 @@ def test_settings_default_auth_file_can_live_in_state_directory(monkeypatch, tmp
     assert settings.paths.token_file == (tmp_path / "state" / ".auth").resolve()
 
 
+def test_settings_lost_metadata_file_defaults_to_state_directory(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "client")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_IDS", "playlist-a")
+    monkeypatch.delenv("TRACKER_LOST_METADATA_FILE", raising=False)
+
+    settings = AppSettings.load(tmp_path)
+
+    assert settings.paths.lost_metadata_file == (tmp_path / "state" / "lost_metadata.json").resolve()
+
+
+def test_settings_lost_metadata_file_can_be_overridden(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "client")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_IDS", "playlist-a")
+    monkeypatch.setenv("TRACKER_LOST_METADATA_FILE", "data/lost.json")
+
+    settings = AppSettings.load(tmp_path)
+
+    assert settings.paths.lost_metadata_file == (tmp_path / "data" / "lost.json").resolve()
+
+
 def test_settings_default_schedule_is_daily(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SPOTIFY_CLIENT_ID", "client")
     monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "secret")

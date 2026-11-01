@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
+
+LostTracks = Mapping[str, Mapping[str, Any]]
 
 
 def utc_now() -> datetime:
@@ -268,7 +271,13 @@ class DiffReport:
 
         return "\n".join(lines)
 
-    def format_markdown(self, snapshot: PlaylistSnapshot, hide_reordered: bool = False) -> str:
+    def format_markdown(
+        self,
+        snapshot: PlaylistSnapshot,
+        hide_reordered: bool = False,
+        lost_tracks: LostTracks | None = None,
+    ) -> str:
+        lost_tracks = lost_tracks or {}
         lines = [
             f"# Playlist Summary: {self.playlist_name}",
             "",
@@ -283,7 +292,11 @@ class DiffReport:
             lines.append("- Previous snapshot: none")
 
         if self.unavailable:
-            lines.extend(self._format_markdown_change_section("Newly Unavailable", self.unavailable, include_reason=True))
+            lines.extend(
+                self._format_markdown_change_section(
+                    "Newly Unavailable", self.unavailable, lost_tracks=lost_tracks, include_reason=True
+                )
+            )
 
         lines.extend(
             [
@@ -316,11 +329,13 @@ class DiffReport:
                 ]
             )
         else:
-            lines.extend(self._format_markdown_change_section("Added", self.added))
-            lines.extend(self._format_markdown_change_section("Removed", self.removed))
+            lines.extend(self._format_markdown_change_section("Added", self.added, lost_tracks=lost_tracks))
+            lines.extend(self._format_markdown_change_section("Removed", self.removed, lost_tracks=lost_tracks))
             if not hide_reordered:
-                lines.extend(self._format_markdown_change_section("Reordered", self.reordered))
-            lines.extend(self._format_markdown_change_section("Changed", self.changed, include_fields=True))
+                lines.extend(self._format_markdown_change_section("Reordered", self.reordered, lost_tracks=lost_tracks))
+            lines.extend(
+                self._format_markdown_change_section("Changed", self.changed, lost_tracks=lost_tracks, include_fields=True)
+            )
 
         unavailable_entries = [entry for entry in snapshot.entries if not entry.is_available]
         lines.extend(
@@ -337,8 +352,7 @@ class DiffReport:
                 ]
             )
             for entry in unavailable_entries:
-                song = _markdown_escape(entry.name or "Unknown")
-                artists = _markdown_escape(", ".join(entry.artists) if entry.artists else "Unknown")
+                song, artists = _markdown_identity(entry.metadata(), lost_tracks)
                 reason = _markdown_escape(entry.availability_status)
                 explanation = _markdown_escape(entry.availability_explanation(snapshot.market))
                 lines.append(f"| {song} | {artists} | {reason} | {explanation} |")
@@ -353,6 +367,7 @@ class DiffReport:
         title: str,
         changes: tuple[DiffChange, ...],
         *,
+        lost_tracks: LostTracks,
         include_fields: bool = False,
         include_reason: bool = False,
     ) -> list[str]:
@@ -365,8 +380,7 @@ class DiffReport:
             item = change.after or change.before or {}
             if include_reason and _is_track_identity_missing(change.after) and change.before:
                 item = change.before
-            name = _markdown_escape(item.get("name") or "Unknown")
-            artists = _markdown_escape(", ".join(item.get("artists", [])) or "Unknown")
+            name, artists = _markdown_identity(item, lost_tracks)
             before_position = change.before_position if change.before_position is not None else "-"
             after_position = change.after_position if change.after_position is not None else "-"
             position_text = f"positions {before_position} -> {after_position}"
@@ -397,6 +411,17 @@ class DiffReport:
 
 def _markdown_escape(value: str) -> str:
     return value.replace("|", "\\|")
+
+
+def unknown_label(former: str | None) -> str:
+    return f"Unknown ({former})" if former else "Unknown"
+
+
+def _markdown_identity(item: Mapping[str, Any], lost_tracks: LostTracks) -> tuple[str, str]:
+    former = lost_tracks.get(item.get("spotify_id") or "", {})
+    name = item.get("name") or unknown_label(former.get("name"))
+    artists = ", ".join(item.get("artists", [])) or unknown_label(", ".join(former.get("artists", [])))
+    return _markdown_escape(name), _markdown_escape(artists)
 
 
 def _format_changed_field_values(change: DiffChange) -> list[str]:

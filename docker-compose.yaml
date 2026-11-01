@@ -10,6 +10,7 @@ services:
       TRACKER_SCHEDULE: ${TRACKER_SCHEDULE:-daily}
       TRACKER_RESULTS_DIR: /app/results
       TRACKER_AUTH_FILE: /app/state/.auth
+      TRACKER_LOST_METADATA_FILE: /app/state/lost_metadata.json
       TRACKER_AUTH_BIND_HOST: 0.0.0.0
       SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-http://127.0.0.1:8899/callback}
     volumes:

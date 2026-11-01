@@ -13,9 +13,10 @@ The main workflow is the **`check`** command. On every run it:
 1. Fetches playlist items from the Spotify API for each configured playlist.
 2. Saves a **snapshot** JSON
 3. Compares the current snapshot against the previous one and saves a **diff** JSON when changes are detected.
-4. Creates a **markdown summary** on the initial run or when the diff contains removals, reorders, metadata changes, or newly unavailable tracks. Summaries are skipped when the only changes are added tracks (override with `--force-summary`).
-5. Sends a **webhook** per generated summary when `TRACKER_SUMMARY_WEBHOOK_URL` is configured. The payload includes both markdown and HTML, suitable for email delivery.
-6. If token refresh fails (for example expired/invalid refresh token), sends a **failure webhook** with a warning markdown/html payload when `TRACKER_SUMMARY_WEBHOOK_URL` is configured.
+4. Records tracks that lost their Spotify metadata (name and artists removed while the track became unavailable) in the **lost metadata registry**. Summaries and unavailable summaries write such tracks as `Unknown (<former name>)` instead of `Unknown`.
+5. Creates a **markdown summary** on the initial run or when the diff contains removals, reorders, metadata changes, or newly unavailable tracks. Summaries are skipped when the only changes are added tracks (override with `--force-summary`).
+6. Sends a **webhook** per generated summary when `TRACKER_SUMMARY_WEBHOOK_URL` is configured. The payload includes both markdown and HTML, suitable for email delivery.
+7. If token refresh fails (for example expired/invalid refresh token), sends a **failure webhook** with a warning markdown/html payload when `TRACKER_SUMMARY_WEBHOOK_URL` is configured.
 
 The **`run`** command wraps `check` with a schedule loop — it runs `check` immediately, then repeats according to `TRACKER_SCHEDULE`.
 
@@ -60,6 +61,9 @@ Optional variables:
   Default: `results`
 - `TRACKER_AUTH_FILE`
   Default: `state/.auth`
+- `TRACKER_LOST_METADATA_FILE`
+  Default: `state/lost_metadata.json`
+  JSON file holding the [lost metadata registry](#lost-metadata-registry).
 - `TRACKER_AUTH_BIND_HOST`
   Optional callback listener bind host. Leave empty for local runs. For hosted or Docker deployments this should usually be `0.0.0.0` so the callback listener accepts inbound requests for your public hostname.
 - `TRACKER_SCHEDULE`
@@ -124,6 +128,32 @@ Files created per playlist run:
   - `date_playlistname_playlistid_unavailable_summary.json` when using `checkunavailable`
   - `date_playlistname_playlistid_unavailable_summary.md` when using `checkunavailable`
 
+## Lost Metadata Registry
+
+`check` records every track that becomes unavailable with its name and artists removed (the condition that triggers the destructive unavailable alarm) in the file set by `TRACKER_LOST_METADATA_FILE`. The file is a JSON object keyed by Spotify track ID and is shared by all configured playlists:
+
+```json
+{
+  "<spotify track id>": {
+    "name": "Song",
+    "artists": ["Artist"],
+    "album": "Album",
+    "uri": "spotify:track:<spotify track id>",
+    "last_seen_at": "2026-03-09T00:00:00Z",
+    "lost_at": "2026-03-10T00:00:00Z",
+    "playlists": { "<playlist id>": "<playlist name>" }
+  }
+}
+```
+
+- For snapshot-detected losses, `name`, `artists`, `album` and `uri` are the values from the last snapshot before the metadata was removed.
+- For snapshot-detected losses, `last_seen_at` and `lost_at` are the snapshot timestamps before and after the removal.
+- The first detection of a track is kept. Later detections only add entries to `playlists`.
+
+Manually recovered entries can include verified names and artists from external sources, with evidence URLs in a `sources` array. Unknown `album`, `last_seen_at` and `lost_at` values are `null`; source publication dates do not establish when Spotify removed the metadata.
+
+Blank tracks that have a registry entry are written as `Unknown (<former name>)` and `Unknown (<former artists>)` in the markdown summary and the `checkunavailable` output. Blank tracks without an entry are written as `Unknown`.
+
 ## Auth Bootstrap Without a Preexisting `.auth`
 
 If no auth file is present, the application now self-bootstraps authorization:
@@ -176,6 +206,7 @@ Important details:
 - `results` is mounted as a folder.
 - auth state is mounted as a folder at `./state:/app/state`.
 - the auth file path is `/app/state/.auth`.
+- the lost metadata registry path is `/app/state/lost_metadata.json`.
 - the callback listener bind host is set to `0.0.0.0` so the published container port can receive the Spotify redirect.
 - port `8899` is published so the Spotify callback can reach the container.
 

@@ -46,6 +46,7 @@ class PathConfig:
     root_dir: Path
     results_dir: Path
     token_file: Path
+    lost_metadata_file: Path
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,11 @@ class AppSettings:
             root_dir=root_dir,
             results_dir=_resolve_path(root_dir, os.getenv("TRACKER_RESULTS_DIR"), Path("results")),
             token_file=_resolve_path(root_dir, os.getenv("TRACKER_AUTH_FILE"), Path("state") / ".auth"),
+            lost_metadata_file=_resolve_path(
+                root_dir,
+                os.getenv("TRACKER_LOST_METADATA_FILE"),
+                Path("state") / "lost_metadata.json",
+            ),
         )
 
         return cls(spotify=spotify, playlists=playlists, runtime=runtime, paths=paths)
