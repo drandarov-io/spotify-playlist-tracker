@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from enum import StrEnum, auto
 from typing import Any
 
 LostTracks = Mapping[str, Mapping[str, Any]]
@@ -184,6 +185,16 @@ class DiffChange:
         }
 
 
+class SummaryWebhookTrigger(StrEnum):
+    BASELINE = auto()
+    ADDED = auto()
+    REMOVED = auto()
+    REORDERED = auto()
+    CHANGED = auto()
+    ID_ONLY = auto()
+    UNAVAILABLE = auto()
+
+
 @dataclass(frozen=True)
 class DiffReport:
     playlist_id: str
@@ -216,7 +227,27 @@ class DiffReport:
         return self.should_create_summary_for(False)
 
     def should_create_summary_for(self, force_summary: bool = False) -> bool:
-        return force_summary or self.is_initial_run or any((self.removed, self.reordered, self.changed, self.unavailable))
+        return force_summary or self.is_initial_run or self.has_changes
+
+    def matches_summary_webhook_triggers(self, triggers: frozenset[SummaryWebhookTrigger]) -> bool:
+        if (
+            (self.is_initial_run and SummaryWebhookTrigger.BASELINE in triggers)
+            or (self.added and SummaryWebhookTrigger.ADDED in triggers)
+            or (self.removed and SummaryWebhookTrigger.REMOVED in triggers)
+            or (self.reordered and SummaryWebhookTrigger.REORDERED in triggers)
+            or (self.unavailable and SummaryWebhookTrigger.UNAVAILABLE in triggers)
+        ):
+            return True
+
+        for change in self.changed:
+            trigger = (
+                SummaryWebhookTrigger.ID_ONLY
+                if change.changed_fields and {"spotify_id", "uri"}.issuperset(change.changed_fields)
+                else SummaryWebhookTrigger.CHANGED
+            )
+            if trigger in triggers:
+                return True
+        return False
 
     def to_dict(self) -> dict[str, Any]:
         return {

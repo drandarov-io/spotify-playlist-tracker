@@ -6,6 +6,17 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .models import SummaryWebhookTrigger
+
+
+DEFAULT_SUMMARY_WEBHOOK_TRIGGERS = frozenset({
+    SummaryWebhookTrigger.BASELINE,
+    SummaryWebhookTrigger.REMOVED,
+    SummaryWebhookTrigger.REORDERED,
+    SummaryWebhookTrigger.CHANGED,
+    SummaryWebhookTrigger.UNAVAILABLE,
+})
+
 
 class SettingsError(RuntimeError):
     pass
@@ -39,6 +50,7 @@ class RuntimeConfig:
     auth_bind_host: str | None
     hide_reordered_section: bool = False
     destructive_unavailable_webhook_url: str | None = None
+    summary_webhook_triggers: frozenset[SummaryWebhookTrigger] = DEFAULT_SUMMARY_WEBHOOK_TRIGGERS
 
 
 @dataclass(frozen=True)
@@ -83,6 +95,7 @@ class AppSettings:
         runtime = RuntimeConfig(
             schedule=os.getenv("TRACKER_SCHEDULE", "daily").strip() or "daily",
             summary_webhook_url=_validate_optional_url("TRACKER_SUMMARY_WEBHOOK_URL"),
+            summary_webhook_triggers=_parse_summary_webhook_triggers(os.getenv("TRACKER_SUMMARY_WEBHOOK_TRIGGERS")),
             webhook_timeout_seconds=_parse_positive_float("TRACKER_WEBHOOK_TIMEOUT_SECONDS", 15.0),
             auth_bind_host=_empty_to_none(os.getenv("TRACKER_AUTH_BIND_HOST")),
             hide_reordered_section=_parse_bool(os.getenv("HIDE_REORDERED"), False),
@@ -125,6 +138,17 @@ def _parse_csv_env(name: str) -> tuple[str, ...]:
     if not values:
         raise SettingsError(f"{name} is required and must contain at least one comma-separated playlist ID.")
     return values
+
+
+def _parse_summary_webhook_triggers(raw_value: str | None) -> frozenset[SummaryWebhookTrigger]:
+    if raw_value is None:
+        return DEFAULT_SUMMARY_WEBHOOK_TRIGGERS
+    if not raw_value.strip():
+        return frozenset()
+    try:
+        return frozenset(SummaryWebhookTrigger(item.strip().lower()) for item in raw_value.split(","))
+    except ValueError as error:
+        raise SettingsError(f"Invalid TRACKER_SUMMARY_WEBHOOK_TRIGGERS: {error}. Valid triggers: {', '.join(SummaryWebhookTrigger)}.") from error
 
 
 def _parse_bool(raw_value: str | None, default: bool) -> bool:

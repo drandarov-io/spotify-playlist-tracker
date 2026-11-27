@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument(
         "--force-summary",
         action="store_true",
-        help="Write a markdown summary even when the diff would normally skip summary generation.",
+        help="Write a markdown summary even when nothing changed, without forcing a webhook.",
     )
     check_parser.add_argument(
         "--raw-output",
@@ -100,6 +100,7 @@ def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bo
                 raw_path = snapshot_store.save_raw(current.fetched_at, current.playlist_name, current.playlist_id, fetched.raw_payload)
                 diff_path = snapshot_store.save_diff(report) if report.has_changes else None
                 summary_path = None
+                summary_webhook_sent = False
 
                 if report.should_create_summary_for(force_summary):
                     summary_path = snapshot_store.save_summary(
@@ -108,7 +109,7 @@ def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bo
                         hide_reordered=settings.runtime.hide_reordered_section,
                         lost_tracks=lost_tracks,
                     )
-                    if settings.runtime.summary_webhook_url:
+                    if settings.runtime.summary_webhook_url and report.matches_summary_webhook_triggers(settings.runtime.summary_webhook_triggers):
                         markdown = summary_path.read_text(encoding="utf-8")
                         send_summary_webhook(
                             webhook_url=settings.runtime.summary_webhook_url,
@@ -119,6 +120,7 @@ def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bo
                             summary_path=summary_path,
                             timeout_seconds=settings.runtime.webhook_timeout_seconds,
                         )
+                        summary_webhook_sent = True
 
                 destructive_changes = report.destructive_unavailable
                 destructive_webhook_url = (
@@ -181,8 +183,10 @@ def run_check(settings: AppSettings, force_summary: bool = False, raw_output: bo
                         print(f"  Diff: {diff_path}")
                     if summary_path is not None:
                         print(f"  Summary: {summary_path}")
-                        if settings.runtime.summary_webhook_url:
+                        if summary_webhook_sent:
                             print(f"  Webhook: delivered to {settings.runtime.summary_webhook_url}")
+                        elif settings.runtime.summary_webhook_url:
+                            print("  Webhook: skipped (no matching summary trigger)")
                     print()
             except (SpotifyApiError, WebhookError) as error:
                 had_errors = True

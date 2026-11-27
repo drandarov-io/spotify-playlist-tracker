@@ -14,8 +14,8 @@ The main workflow is the **`check`** command. On every run it:
 2. Saves a **snapshot** JSON
 3. Compares the current snapshot against the previous one and saves a **diff** JSON when changes are detected.
 4. Records tracks that lost their Spotify metadata (name and artists removed while the track became unavailable) in the **lost metadata registry**. Summaries and unavailable summaries write such tracks as `Unknown (<former name>)` instead of `Unknown`.
-5. Creates a **markdown summary** on the initial run or when the diff contains removals, reorders, metadata changes, or newly unavailable tracks. Summaries are skipped when the only changes are added tracks (override with `--force-summary`).
-6. Sends a **webhook** per generated summary when `TRACKER_SUMMARY_WEBHOOK_URL` is configured. The payload includes both markdown and HTML, suitable for email delivery.
+5. Saves a **markdown summary** on the initial run and on every run with changes, including additions-only runs.
+6. Sends the full summary as a **webhook** when `TRACKER_SUMMARY_WEBHOOK_URL` is configured and at least one finding matches `TRACKER_SUMMARY_WEBHOOK_TRIGGERS`. Additions and Spotify ID/URI-only changes do not trigger delivery by default. The payload includes both markdown and HTML, suitable for email delivery.
 7. If token refresh fails (for example expired/invalid refresh token), sends a **failure webhook** with a warning markdown/html payload when `TRACKER_SUMMARY_WEBHOOK_URL` is configured.
 
 The **`run`** command wraps `check` with a schedule loop — it runs `check` immediately, then repeats according to `TRACKER_SCHEDULE`.
@@ -72,13 +72,25 @@ Optional variables:
   Also supports a standard 5-field cron expression in UTC
 - `TRACKER_SUMMARY_WEBHOOK_URL`
   Optional webhook endpoint for markdown summaries
+- `TRACKER_SUMMARY_WEBHOOK_TRIGGERS`
+  Comma-separated list. Default: `baseline,removed,reordered,changed,unavailable`. Set it to an empty value to disable summary webhooks while keeping auth-failure and destructive-unavailability alerts.
+
+  | Trigger | Sends a summary when |
+  | --- | --- |
+  | `baseline` | The playlist has no previous snapshot. |
+  | `added`, `removed`, `reordered` | A track was added, removed, or moved, respectively. |
+  | `id_only` | A track's only changed metadata fields are `spotify_id`, `uri`, or both. |
+  | `changed` | At least one metadata field other than `spotify_id` or `uri` changed on a track. |
+  | `unavailable` | A previously available track became unavailable. This also counts as `changed` because its availability metadata changed. |
+
+  For example, `TRACKER_SUMMARY_WEBHOOK_TRIGGERS=removed,unavailable` sends only for removals or newly unavailable tracks. If the same report also contains additions or changed IDs, the delivered summary includes them. Selecting triggers does not change the saved results.
 - `TRACKER_DESTRUCTIVE_UNAVAILABLE_WEBHOOK_URL`
   Optional webhook endpoint for destructive unavailable alarms (tracks that become unavailable and lose identity metadata such as name/artists). If omitted, alarms are sent to `TRACKER_SUMMARY_WEBHOOK_URL`.
 - `TRACKER_WEBHOOK_TIMEOUT_SECONDS`
   Default: `15`
 - `HIDE_REORDERED`
   Default: `false`
-  When `true`, the summary still reports `Reordered` count in the diff table, but omits the `## Reordered` section body.
+  When `true`, the summary still reports the `Reordered` count in the diff table, but omits the `## Reordered` section body. To stop reorders from triggering delivery, omit `reordered` from `TRACKER_SUMMARY_WEBHOOK_TRIGGERS`.
 
 Example `.env` values are provided in `.env.example`.
 
@@ -92,7 +104,7 @@ Parameters:
 
 | Flag | Effect |
 | ---- | ------ |
-| `--force-summary` | Create a markdown summary even when only additions were detected or nothing changed |
+| `--force-summary` | Write a local markdown summary even when nothing changed; does not force a webhook |
 | `--raw-output` | Print the full diff report as JSON (change fields, reasons, file paths) instead of the default artifact-path log |
 
 Auth behavior: if the auth file already exists, it uses or refreshes it. If it does not exist, it logs the Spotify authorization URL, waits for the callback, saves `.auth`, prints the token JSON to stdout, and continues with the check.
@@ -253,7 +265,7 @@ If you use a reverse proxy or a different public port, update `SPOTIFY_REDIRECT_
 
 ## Webhook Payload
 
-When a summary is created and `TRACKER_SUMMARY_WEBHOOK_URL` is set, the application sends one POST request with JSON containing:
+When a report matches a configured summary trigger and `TRACKER_SUMMARY_WEBHOOK_URL` is set, the application sends one POST request for that playlist with JSON containing:
 
 - playlist metadata
 - timestamps

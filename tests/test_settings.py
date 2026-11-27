@@ -13,6 +13,7 @@ def test_settings_load_from_environment(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TRACKER_AUTH_FILE", ".auth")
     monkeypatch.setenv("TRACKER_SCHEDULE", "daily")
     monkeypatch.setenv("TRACKER_SUMMARY_WEBHOOK_URL", "https://example.test/hook")
+    monkeypatch.setenv("TRACKER_SUMMARY_WEBHOOK_TRIGGERS", " added, ID_ONLY ")
     monkeypatch.setenv("TRACKER_DESTRUCTIVE_UNAVAILABLE_WEBHOOK_URL", "https://example.test/alarm")
     monkeypatch.setenv("TRACKER_WEBHOOK_TIMEOUT_SECONDS", "12")
     monkeypatch.setenv("HIDE_REORDERED", "true")
@@ -26,9 +27,23 @@ def test_settings_load_from_environment(monkeypatch, tmp_path) -> None:
     assert settings.paths.token_file == (tmp_path / ".auth").resolve()
     assert settings.runtime.schedule == "daily"
     assert settings.runtime.summary_webhook_url == "https://example.test/hook"
+    assert settings.runtime.summary_webhook_triggers == {"added", "id_only"}
     assert settings.runtime.destructive_unavailable_webhook_url == "https://example.test/alarm"
     assert settings.runtime.webhook_timeout_seconds == 12.0
     assert settings.runtime.hide_reordered_section is True
+
+
+def test_empty_trigger_list_disables_summary_webhooks(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TRACKER_SUMMARY_WEBHOOK_TRIGGERS", "")
+
+    assert AppSettings.load(tmp_path, require_playlists=False).runtime.summary_webhook_triggers == frozenset()
+
+
+def test_invalid_summary_webhook_trigger_is_reported(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TRACKER_SUMMARY_WEBHOOK_TRIGGERS", "added,typo")
+
+    with pytest.raises(SettingsError, match="TRACKER_SUMMARY_WEBHOOK_TRIGGERS.*typo"):
+        AppSettings.load(tmp_path, require_playlists=False)
 
 
 def test_settings_require_playlist_ids_for_check(monkeypatch, tmp_path) -> None:

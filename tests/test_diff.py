@@ -1,5 +1,10 @@
+from dataclasses import replace
+
+import pytest
+
 from spotify_playlist_tracker.diff import compare_snapshots
-from spotify_playlist_tracker.models import PlaylistEntry, PlaylistSnapshot
+from spotify_playlist_tracker.models import PlaylistEntry, PlaylistSnapshot, SummaryWebhookTrigger
+from spotify_playlist_tracker.settings import DEFAULT_SUMMARY_WEBHOOK_TRIGGERS
 
 
 def make_entry(position: int, spotify_id: str, *, name: str = "Song", playable: bool | None = True, restriction: str | None = None):
@@ -101,6 +106,8 @@ def test_format_markdown_hides_reordered_section_when_requested() -> None:
 
     assert "| Reordered | 2 |" in content
     assert "## Reordered" not in content
+    assert report.matches_summary_webhook_triggers(frozenset({SummaryWebhookTrigger.REORDERED}))
+    assert not report.matches_summary_webhook_triggers(frozenset({SummaryWebhookTrigger.CHANGED}))
 
 
 def test_format_markdown_places_newly_unavailable_before_diff_summary() -> None:
@@ -235,9 +242,11 @@ def test_compare_snapshots_handles_initial_run() -> None:
 
     assert report.is_initial_run is True
     assert not report.added
+    assert report.matches_summary_webhook_triggers(frozenset({SummaryWebhookTrigger.BASELINE}))
+    assert not report.matches_summary_webhook_triggers(frozenset({SummaryWebhookTrigger.ADDED}))
 
 
-def test_added_only_diff_does_not_create_summary() -> None:
+def test_added_only_diff_creates_summary() -> None:
     previous = make_snapshot(make_entry(0, "a"))
     current = make_snapshot(
         make_entry(0, "a"),
@@ -248,7 +257,9 @@ def test_added_only_diff_does_not_create_summary() -> None:
     report = compare_snapshots(previous, current)
 
     assert len(report.added) == 1
-    assert report.should_create_summary is False
+    assert report.should_create_summary is True
+    assert not report.matches_summary_webhook_triggers(DEFAULT_SUMMARY_WEBHOOK_TRIGGERS)
+    assert report.matches_summary_webhook_triggers(frozenset({SummaryWebhookTrigger.ADDED}))
 
 
 def test_removed_diff_creates_summary() -> None:
@@ -270,6 +281,20 @@ def test_force_summary_overrides_no_change_behavior() -> None:
     assert report.has_changes is False
     assert report.should_create_summary is False
     assert report.should_create_summary_for(True) is True
+    assert not report.matches_summary_webhook_triggers(frozenset(SummaryWebhookTrigger))
+
+
+@pytest.mark.parametrize(("updates", "id_only"), [
+    ({"spotify_id": "new"}, True),
+    ({"uri": "spotify:track:new"}, True),
+    ({"spotify_id": "new", "uri": "spotify:track:new", "album": "New Album"}, False),
+])
+def test_summary_webhook_distinguishes_id_only_from_other_metadata(updates, id_only) -> None:
+    track = make_entry(436, "old")
+    report = compare_snapshots(make_snapshot(track), make_snapshot(replace(track, **updates)))
+
+    assert report.matches_summary_webhook_triggers(frozenset({SummaryWebhookTrigger.ID_ONLY})) is id_only
+    assert report.matches_summary_webhook_triggers(frozenset({SummaryWebhookTrigger.CHANGED})) is not id_only
 
 
 def test_relinked_track_shows_as_changed_not_added_removed() -> None:
@@ -309,6 +334,8 @@ def test_relinked_track_detected_as_unavailable_when_applicable() -> None:
     assert len(report.removed) == 0
     assert len(report.changed) == 1
     assert len(report.unavailable) == 1
+    assert report.matches_summary_webhook_triggers(frozenset({SummaryWebhookTrigger.UNAVAILABLE}))
+    assert not report.matches_summary_webhook_triggers(frozenset({SummaryWebhookTrigger.ID_ONLY}))
 
 
 def test_different_name_different_id_still_shows_as_added_removed() -> None:

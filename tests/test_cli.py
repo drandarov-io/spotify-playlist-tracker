@@ -1,11 +1,15 @@
 import json
+from dataclasses import replace
+from unittest.mock import Mock
 
+import httpx
 import pytest
 
 from spotify_playlist_tracker.cli import _build_unavailable_entry_payload, build_parser, run_check
 from spotify_playlist_tracker.auth import AuthError
 from spotify_playlist_tracker.models import DiffReport, PlaylistEntry, PlaylistSnapshot, TokenData
 from spotify_playlist_tracker.settings import AppSettings, PathConfig, PlaylistConfig, RuntimeConfig, SpotifyCredentials
+from spotify_playlist_tracker.spotify_api import PlaylistFetchResult, SpotifyClient
 from spotify_playlist_tracker.storage import SnapshotStore
 
 
@@ -53,6 +57,51 @@ def test_checkunavailable_parser_selects_command() -> None:
     assert args.command == "checkunavailable"
 
 
+@pytest.mark.parametrize(("with_removal", "force_summary"), [
+    pytest.param(False, False, id="id-only"),
+    pytest.param(False, True, id="forced-id-only"),
+    pytest.param(True, False, id="id-and-removal"),
+])
+def test_run_check_keeps_id_changes_and_sends_only_for_matching_findings(monkeypatch, tmp_path, capsys, with_removal, force_summary) -> None:
+    settings = build_settings(tmp_path)
+    settings = replace(settings, runtime=replace(settings.runtime, summary_webhook_url="https://example.test/summary"))
+    track = PlaylistEntry(position=436, item_type="track", spotify_id="old", uri="spotify:track:old", name="Song")
+    entries = (track,)
+    if with_removal:
+        entries += (replace(track, position=437, spotify_id="other", uri="spotify:track:other", name="Other"),)
+    previous = PlaylistSnapshot("playlist-1", "Playlist", "2026-03-09T00:00:00Z", "DE", len(entries), entries=entries)
+    current = replace(
+        previous, fetched_at="2026-03-10T00:00:00Z", total_items=1,
+        entries=(replace(track, spotify_id="new", uri="spotify:track:new"),),
+    )
+    SnapshotStore(settings.paths.results_dir).save_snapshot(previous)
+    monkeypatch.setattr("spotify_playlist_tracker.cli.get_valid_token", lambda *_: TokenData("access", "refresh", 9999999999))
+    monkeypatch.setattr(SpotifyClient, "fetch_playlist_data", lambda *_: PlaylistFetchResult(current, {}))
+    post = Mock(return_value=httpx.Response(204))
+    monkeypatch.setattr("spotify_playlist_tracker.webhook.httpx.post", post)
+
+    assert run_check(settings, force_summary=force_summary) == 0
+
+    output = capsys.readouterr().out
+    markdown = next(settings.paths.results_dir.glob("*_summary.md")).read_text(encoding="utf-8")
+    diff = json.loads(next(settings.paths.results_dir.glob("*_diff.json")).read_text(encoding="utf-8"))
+    assert diff["changed"][0]["changed_fields"] == ["spotify_id", "uri"]
+    assert "positions 436 -> 436" in markdown
+    assert "spotify_id: old -> new" in markdown
+    assert "uri: spotify:track:old -> spotify:track:new" in markdown
+    if with_removal:
+        post.assert_called_once()
+        payload = post.call_args.kwargs["json"]
+        assert payload["markdown"] == markdown
+        assert payload["change_counts"] == diff["summary"]
+        assert "| Removed | 1 |" in markdown
+        assert "Webhook: delivered" in output
+    else:
+        post.assert_not_called()
+        assert "Webhook: skipped" in output
+        assert "Webhook: delivered" not in output
+
+
 def test_run_check_sends_failure_webhook_when_refresh_fails(monkeypatch, tmp_path) -> None:
     settings = build_settings(tmp_path)
     settings = AppSettings(
@@ -61,6 +110,7 @@ def test_run_check_sends_failure_webhook_when_refresh_fails(monkeypatch, tmp_pat
         runtime=RuntimeConfig(
             schedule="daily",
             summary_webhook_url="https://example.test/hook",
+            summary_webhook_triggers=frozenset(),
             webhook_timeout_seconds=15.0,
             auth_bind_host=None,
             hide_reordered_section=False,
@@ -370,6 +420,7 @@ def test_run_check_sends_destructive_unavailable_alarm(monkeypatch, tmp_path) ->
         runtime=RuntimeConfig(
             schedule="daily",
             summary_webhook_url="https://example.test/summary",
+            summary_webhook_triggers=frozenset(),
             webhook_timeout_seconds=15.0,
             auth_bind_host=None,
             hide_reordered_section=False,
@@ -483,12 +534,14 @@ def test_run_check_sends_destructive_unavailable_alarm(monkeypatch, tmp_path) ->
     )
     monkeypatch.setattr("spotify_playlist_tracker.cli.SnapshotStore", lambda _path: FakeStore(_path))
     monkeypatch.setattr("spotify_playlist_tracker.cli.SpotifyClient", FakeSpotifyClient)
-    monkeypatch.setattr("spotify_playlist_tracker.cli.send_summary_webhook", lambda **kwargs: None)
+    send_summary = Mock()
+    monkeypatch.setattr("spotify_playlist_tracker.cli.send_summary_webhook", send_summary)
     monkeypatch.setattr("spotify_playlist_tracker.cli.send_destructive_unavailable_webhook", fake_alarm_webhook)
 
     exit_code = run_check(settings)
 
     assert exit_code == 0
+    send_summary.assert_not_called()
     assert captured_alarm["webhook_url"] == "https://example.test/alarm"
     assert "Alert in Playlist" == captured_alarm["title"]
     assert "Playlist" == captured_alarm["playlist_name"]
